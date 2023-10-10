@@ -200,3 +200,21 @@ def ablate_resid_with_precalc_mean(
 def names_filter(name: str):
     """Filter for the names of the activations we want to keep to study the resid stream."""
     return name.endswith('resid_post') or name == get_act_name('resid_pre', 0)
+
+def convert_to_tensors(dataset, column_name='tokens'):
+    token_buffer = []
+    final_batches = []
+    
+    for batch in dataset:
+        trimmed_batch = batch[column_name] #[batch[column_name][0]] + [token for token in batch[column_name] if token != 0]
+        final_batches.append(trimmed_batch)
+    
+    # Convert list of batches to tensors
+    final_batches = [torch.tensor(batch, dtype=torch.long) for batch in final_batches]
+    # Create a new dataset with specified features
+    features = Features({"tokens": Sequence(Value("int64"))})
+    final_dataset = Dataset.from_dict({"tokens": final_batches}, features=features)
+
+    final_dataset.set_format(type="torch", columns=["tokens"])
+    
+    return final_dataset
