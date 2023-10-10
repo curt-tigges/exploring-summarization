@@ -196,3 +196,7 @@ def ablate_resid_with_precalc_mean(
             component[i, p, :] = cached_means[layer]
             
     return component
+
+def names_filter(name: str):
+    """Filter for the names of the activations we want to keep to study the resid stream."""
+    return name.endswith('resid_post') or name == get_act_name('resid_pre', 0)
