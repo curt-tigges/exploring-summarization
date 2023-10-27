@@ -31,3 +31,4 @@ RUN wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-1/wkh
 RUN apt install -f ./wkhtmltox_0.12.6-1.focal_amd64.deb -y
 RUN pip install imgkit
 RUN pip install dill==0.3.4
+RUN pip install jupyter ipykernel pytest pytest-doctestplus nbval pytest-cov
