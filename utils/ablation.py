@@ -1,20 +1,22 @@
-from typing import Callable, List, Literal, Union
+from typing import Callable, Dict, List, Literal, Optional, Union
 import torch
 from torch import Tensor
 from jaxtyping import Float, Int
 import numpy as np
 from transformer_lens.hook_points import HookPoint
 from transformer_lens import ActivationCache
+from transformer_lens.utils import get_act_name
+from datasets import Dataset, Features, Sequence, Value
 
 
 def handle_position(
-    pos: Union[Literal["each"], int, List[int]],
-    component: Float[Tensor, "batch pos ..."],
+    pos: Union[Literal["each"], int, List[int], Int[Tensor, "batch pos ..."]],
+    component: Int[Tensor, "batch pos ..."],
 ) -> Int[Tensor, "subset_pos"]:
     """Handles the position argument for ablation functions"""
-    if isinstance(pos, int):
+    if isinstance(pos, int) or isinstance(pos, list):
         pos = torch.tensor([pos])
-    if pos == "each":
+    elif pos == "each":
         pos = torch.tensor(list(range(component.shape[1])))
     return pos
 
@@ -33,7 +35,9 @@ def resample_cache_component(
     return component
 
 
-def mean_over_cache_component(component: Float[Tensor, "batch ..."]) -> Float[Tensor, "batch ..."]:
+def mean_over_cache_component(
+    component: Float[Tensor, "batch ..."]
+) -> Float[Tensor, "batch ..."]:
     """
     Mean-ablates a batch tensor
 
@@ -49,17 +53,19 @@ def mean_over_cache_component(component: Float[Tensor, "batch ..."]) -> Float[Te
     return copy_to_ablate
 
 
-def zero_cache_component(component: torch.tensor) -> torch.tensor:
+def zero_cache_component(component: Tensor) -> Tensor:
     """Zero-ablates a batch tensor"""
     return torch.zeros_like(component)
 
 
 def zero_attention_pos_hook(
-    pattern: Float[Tensor, "batch head seq_Q seq_K"], hook: HookPoint,
-    pos_by_batch: List[List[int]], layer: int = 0, head_idx: int = 0,
+    pattern: Float[Tensor, "batch head seq_Q seq_K"],
+    hook: HookPoint,
+    pos_by_batch: List[List[int]],
+    head_idx: int = 0,
 ) -> Float[Tensor, "batch head seq_Q seq_K"]:
     """Zero-ablates an attention pattern tensor at a particular position"""
-    assert 'pattern' in hook.name
+    assert hook.name is not None and "pattern" in hook.name
 
     batch_size = pattern.shape[0]
     assert len(pos_by_batch) == batch_size
@@ -67,18 +73,25 @@ def zero_attention_pos_hook(
     for i in range(batch_size):
         for p in pos_by_batch[i]:
             pattern[i, head_idx, p, p] = 0
-            
+
     return pattern
 
 
 def freeze_attn_pattern_hook(
-    pattern: Float[Tensor, "batch head seq_Q seq_K"], hook: HookPoint, cache: ActivationCache, 
-    layer: int = 0, head_idx: int = 0,
+    pattern: Float[Tensor, "batch head seq_Q seq_K"],
+    hook: HookPoint,
+    cache: ActivationCache,
+    layer: int = 0,
+    head_idx: int = 0,
 ) -> Float[Tensor, "batch head seq_Q seq_K"]:
     """Freeze the attention pattern for a given position, layer and head"""
-    assert 'pattern' in hook.name
-    pattern[:, head_idx, :, :] = cache[f"blocks.{layer}.attn.hook_pattern"][:, head_idx, :, :] 
-    pattern[:, head_idx, :, :] = cache[f"blocks.{layer}.attn.hook_pattern"][:, head_idx, :, :]
+    assert hook.name is not None and "pattern" in hook.name
+    pattern[:, head_idx, :, :] = cache[f"blocks.{layer}.attn.hook_pattern"][
+        :, head_idx, :, :
+    ]
+    pattern[:, head_idx, :, :] = cache[f"blocks.{layer}.attn.hook_pattern"][
+        :, head_idx, :, :
+    ]
     return pattern
 
 
@@ -88,19 +101,23 @@ def freeze_layer_pos_hook(
     cache: ActivationCache,
     component_type: str = "hook_resid_post",
     pos: Union[Literal["each"], int, List[int]] = -1,
-    layer: int = 0
+    layer: int = 0,
 ) -> Float[Tensor, "batch pos ..."]:
     """Base function to freeze the layer for a given position, layer and head"""
-    assert component_type in hook.name
-    pos = handle_position(pos, component)
-    for p in pos:
+    assert hook.name is not None and component_type in hook.name
+    pos_t = handle_position(pos, component)
+    for p in pos_t:
         component[:, p, :] = cache[f"blocks.{layer}.{component_type}"][:, p, :]
     return component
 
 
 def freeze_mlp_pos_hook(
-    component: Float[Tensor, "batch pos d_mlp"], hook: HookPoint, cache: ActivationCache, 
-    component_type: str = "hook_post", pos: Union[Literal["each"], int, List[int]] = -1, layer: int = 0
+    component: Float[Tensor, "batch pos d_mlp"],
+    hook: HookPoint,
+    cache: ActivationCache,
+    component_type: str = "hook_post",
+    pos: Union[Literal["each"], int, List[int]] = -1,
+    layer: int = 0,
 ):
     """Freeze the mlp for a given position, layer and head"""
     return freeze_layer_pos_hook(
@@ -109,15 +126,21 @@ def freeze_mlp_pos_hook(
 
 
 def freeze_attn_head_pos_hook(
-    component: Float[Tensor, "batch pos head d_head"], hook: HookPoint, 
-    cache: ActivationCache, component_type: str = "hook_z", 
-    pos: Union[Literal["each"], int, List[int]] = -1, layer: int = 0, head_idx: int = 0
+    component: Float[Tensor, "batch pos head d_head"],
+    hook: HookPoint,
+    cache: ActivationCache,
+    component_type: str = "hook_z",
+    pos: Union[Literal["each"], int, List[int]] = -1,
+    layer: int = 0,
+    head_idx: int = 0,
 ):
     """Freeze the attention head for a given position, layer and head"""
-    assert component_type in hook.name
-    pos = handle_position(pos, component)
-    for p in pos:
-        component[:, p, head_idx, :] = cache[f"blocks.{layer}.attn.{component_type}"][:, p, head_idx, :]
+    assert hook.name is not None and component_type in hook.name
+    pos_t = handle_position(pos, component)
+    for p in pos_t:
+        component[:, p, head_idx, :] = cache[f"blocks.{layer}.attn.{component_type}"][
+            :, p, head_idx, :
+        ]
     return component
 
 
@@ -125,18 +148,22 @@ def ablate_layer_pos_hook(
     component: Float[Tensor, "batch pos d_mlp"],
     hook: HookPoint,
     cache: ActivationCache,
-    ablation_func: Callable[[Float[Tensor, "batch ..."]], Float[Tensor, "batch ..."]] = None,
+    ablation_func: Optional[
+        Callable[[Float[Tensor, "batch ..."]], Float[Tensor, "batch ..."]]
+    ] = None,
     component_type: str = "hook_resid_post",
     pos: Union[Literal["each"], int, List[int]] = -1,
-    layer: int = 0
+    layer: int = 0,
 ) -> Float[Tensor, "batch pos d_mlp"]:
     """Base function to ablate the layer for a given position, layer and head"""
-    assert component_type in hook.name
-    pos = handle_position(pos, component)
+    assert hook.name is not None and component_type in hook.name
+    pos_t = handle_position(pos, component)
     if ablation_func is None:
         ablation_func = lambda x: x
-    for p in pos:
-        component[:, p, :] = ablation_func(cache[f"blocks.{layer}.{component_type}"][:, p, :])
+    for p in pos_t:
+        component[:, p, :] = ablation_func(
+            cache[f"blocks.{layer}.{component_type}"][:, p, :]
+        )
     return component
 
 
@@ -144,10 +171,12 @@ def ablate_mlp_pos_hook(
     component: Float[Tensor, "batch pos d_mlp"],
     hook: HookPoint,
     cache: ActivationCache,
-    ablation_func: Callable[[Float[Tensor, "batch ..."]], Float[Tensor, "batch ..."]] = None,
+    ablation_func: Optional[
+        Callable[[Float[Tensor, "batch ..."]], Float[Tensor, "batch ..."]]
+    ] = None,
     component_type: str = "hook_post",
     pos: Union[Literal["each"], int, List[int]] = -1,
-    layer: int = 0
+    layer: int = 0,
 ) -> Float[Tensor, "batch pos d_mlp"]:
     return ablate_layer_pos_hook(
         component, hook, cache, ablation_func, f"mlp.{component_type}", pos, layer
@@ -158,18 +187,22 @@ def ablate_attn_head_pos_hook(
     component: Float[Tensor, "batch pos d_head"],
     hook: HookPoint,
     cache: ActivationCache,
-    ablation_func: Callable[[Float[Tensor, "batch ..."]], Float[Tensor, "batch ..."]] = None,
+    ablation_func: Optional[
+        Callable[[Float[Tensor, "batch ..."]], Float[Tensor, "batch ..."]]
+    ] = None,
     component_type: str = "hook_z",
     pos: Union[Literal["each"], int, List[int]] = -1,
     layer: int = 0,
-    head_idx: int = 0
+    head_idx: int = 0,
 ) -> Float[Tensor, "batch pos d_head"]:
-    assert component_type in hook.name
-    pos = handle_position(pos, component)
+    assert hook.name is not None and component_type in hook.name
+    pos_t = handle_position(pos, component)
     if ablation_func is None:
         ablation_func = lambda x: x
-    for p in pos:
-        component[:, p, head_idx, :] = ablation_func(cache[f"blocks.{layer}.attn.{component_type}"][:, p, head_idx, :])
+    for p in pos_t:
+        component[:, p, head_idx, :] = ablation_func(
+            cache[f"blocks.{layer}.attn.{component_type}"][:, p, head_idx, :]
+        )
     return component
 
 
@@ -186,7 +219,7 @@ def ablate_resid_with_precalc_mean(
     :param component: the tensor to compute the mean over the batch dim of
     :return: the mean over the cache component of the tensor
     """
-    assert 'resid' in hook.name
+    assert hook.name is not None and "resid" in hook.name
 
     batch_size = component.shape[0]
     assert len(pos_by_batch) == batch_size
@@ -194,21 +227,23 @@ def ablate_resid_with_precalc_mean(
     for i in range(batch_size):
         for p in pos_by_batch[i]:
             component[i, p, :] = cached_means[layer]
-            
+
     return component
+
 
 def names_filter(name: str):
     """Filter for the names of the activations we want to keep to study the resid stream."""
-    return name.endswith('resid_post') or name == get_act_name('resid_pre', 0)
+    return name.endswith("resid_post") or name == get_act_name("resid_pre", 0)
 
-def convert_to_tensors(dataset, column_name='tokens'):
-    token_buffer = []
+
+def convert_to_tensors(dataset: Dataset, column_name="tokens"):
     final_batches = []
-    
+
     for batch in dataset:
-        trimmed_batch = batch[column_name] #[batch[column_name][0]] + [token for token in batch[column_name] if token != 0]
+        assert isinstance(batch, dict)
+        trimmed_batch = batch[column_name]
         final_batches.append(trimmed_batch)
-    
+
     # Convert list of batches to tensors
     final_batches = [torch.tensor(batch, dtype=torch.long) for batch in final_batches]
     # Create a new dataset with specified features
@@ -216,5 +251,5 @@ def convert_to_tensors(dataset, column_name='tokens'):
     final_dataset = Dataset.from_dict({"tokens": final_batches}, features=features)
 
     final_dataset.set_format(type="torch", columns=["tokens"])
-    
+
     return final_dataset
