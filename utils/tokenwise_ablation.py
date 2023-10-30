@@ -42,7 +42,8 @@ from utils.ablation import (
     convert_to_tensors,
 )
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # -------------------- GENERAL UTILS --------------------
@@ -96,6 +97,7 @@ def load_directions(
     model: HookedTransformer,
     direction_folder: str = "directions",
     direction_prefix: str = "das_simple_train_ADJ",
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "layer d_model"]:
     """Loads a list of direction vectors of shape (n_layers, d_model)"""
     directions = []
@@ -113,6 +115,7 @@ def load_directions(
 
 def get_random_directions(
     model: HookedTransformer,
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "layer d_model"]:
     """Returns a list of random direction vectors of shape (n_layers, d_model)"""
     directions = []
@@ -129,6 +132,7 @@ def get_random_directions(
 
 def get_zeroed_dir_vector(
     model: HookedTransformer,
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "layer d_model"]:
     """Returns a list of zeroed direction vectors of shape (n_layers, d_model)"""
     zeroed_directions = []
@@ -147,7 +151,10 @@ def get_zeroed_dir_vector(
 
 # -------------------- ACTIVATION UTILS --------------------
 def get_layerwise_token_mean_activations(
-    model: HookedTransformer, data_loader: DataLoader, token_id: int = 13
+    model: HookedTransformer,
+    data_loader: DataLoader,
+    token_id: int,
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "layer d_model"]:
     """Get the mean value of a particular token id across a dataset for each layer of a model
 
@@ -172,12 +179,12 @@ def get_layerwise_token_mean_activations(
         batch_tokens = batch_value["tokens"].to(device)
 
         # get positions of all specified token ids in batch
-        punct_pos = find_positions(batch_tokens, token_ids=[token_id])
+        token_pos = find_positions(batch_tokens, token_ids=[token_id])
 
         _, cache = model.run_with_cache(batch_tokens, names_filter=names_filter)
 
         for i in range(batch_tokens.shape[0]):
-            for p in punct_pos[i]:
+            for p in token_pos[i]:
                 for layer in range(num_layers):
                     activation_sums[layer] += cache[f"blocks.{layer}.hook_resid_post"][
                         i, p, :
@@ -276,20 +283,31 @@ def compute_mean_ablation_modified_logit_diff(
     heads_to_freeze: List[Tuple[int, int]],
     cached_means: Float[Tensor, "layer d_model"],
     frozen_attn_variant: bool = False,
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Tuple[Float[Tensor, "batch"], Float[Tensor, "batch"], Float[Tensor, "batch"]]:
-    """Computes the change in logit difference (between two answers) when the activations of a particular token are mean-ablated.
+    """
+    Computes the change in logit difference (between two answers) when the activations of
+    a particular token are mean-ablated.
 
     Args:
         model: HookedTransformer model
         data_loader: DataLoader for the dataset
         layers_to_ablate: List of layers to ablate
         heads_to_freeze: List of heads to freeze
-        cached_means: List of tensors of shape (layer, d_model) containing the mean value of a given token for each layer
+        cached_means:
+            List of tensors of shape (layer, d_model)
+            containing the mean value of a given token for each layer
 
     Returns:
-        orig_ld_list: List of tensors of shape (batch,) containing the logit difference for each item in the batch before ablation
-        ablated_ld_list: List of tensors of shape (batch,) containing the logit difference for each item in the batch after ablation
-        freeze_ablated_ld_list: List of tensors of shape (batch,) containing the logit difference for each item in the batch after ablation with attention frozen
+        orig_ld_list:
+            List of tensors of shape (batch,)
+            containing the logit difference for each item in the batch before ablation
+        ablated_ld_list:
+            List of tensors of shape (batch,)
+            containing the logit difference for each item in the batch after ablation
+        freeze_ablated_ld_list:
+            List of tensors of shape (batch,)
+            containing the logit difference for each item in the batch after ablation with attention frozen
     """
     orig_ld_list = []
     ablated_ld_list = []
@@ -378,6 +396,7 @@ def compute_directional_ablation_modified_logit_diff(
     direction_vectors: Float[Tensor, "layer d_model"],
     multiplier=1.0,
     frozen_attn_variant: bool = False,
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Tuple[Float[Tensor, "batch"], Float[Tensor, "batch"], Float[Tensor, "batch"]]:
     """Computes the change in logit difference (between two answers) when the activations of a particular token are direction-ablated.
 
@@ -489,6 +508,7 @@ def compute_directional_ablation_modified_logit_diff_all_pos(
     direction_vectors: Float[Tensor, "layer d_model"],
     multiplier: float = 1.0,
     frozen_attn_variant: bool = False,
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Tuple[Float[Tensor, "batch"], Float[Tensor, "batch"], Float[Tensor, "batch"]]:
     orig_ld_list = []
     ablated_ld_list = []
@@ -580,6 +600,7 @@ def compute_zeroed_attn_modified_loss(
     model: HookedTransformer,
     data_loader: DataLoader,
     heads_to_ablate: List[Tuple[int, int]],
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "batch"]:
     loss_list = []
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
@@ -621,6 +642,7 @@ def compute_mean_ablation_modified_loss(
     layers_to_ablate: List[int],
     cached_means: Float[Tensor, "layer d_model"],
     debug: bool = False,
+    device: torch.device = DEFAULT_DEVICE,
 ) -> Tuple[Float[Tensor, "batch"], Float[Tensor, "batch"]]:
     """Computes the change in loss when the activations of a particular token are mean-ablated.
 
