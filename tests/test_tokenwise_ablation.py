@@ -3,7 +3,7 @@ from unittest.mock import patch, Mock
 import torch
 import numpy as np
 from typing import List
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import get_act_name
 from utils.tokenwise_ablation import (
@@ -13,6 +13,8 @@ from utils.tokenwise_ablation import (
     get_zeroed_dir_vector,
     get_layerwise_token_mean_activations,
     zero_attention_pos_hook,
+    compute_ablation_modified_logit_diff,
+    compute_zeroed_attn_modified_loss,
 )
 
 
@@ -38,10 +40,31 @@ class MockDataLoader(DataLoader):
         return len(self.data)
 
 
+class DummyDataset(Dataset):
+    def __init__(self, seed: int = 0):
+        torch.manual_seed(seed)
+        self.tokens = torch.tensor([[14, 9, 8], [0, 13, 9], [3, 11, 11], [6, 9, 13]])
+        self.attention_mask = torch.ones((4, 3), dtype=torch.long)
+        self.positions = torch.ones((4, 3), dtype=torch.long)
+        self.answers = torch.randint(0, 15, (4, 2))
+
+    def __len__(self):
+        return len(self.tokens)
+
+    def __getitem__(self, idx):
+        return {
+            "tokens": self.tokens[idx],
+            "attention_mask": self.attention_mask[idx],
+            "positions": self.positions[idx],
+            "answers": self.answers[idx],
+        }
+
+
 class TestTokenwise(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.model = HookedTransformer.from_pretrained("gelu-1l")
+        torch.manual_seed(0)
 
     def test_find_positions(self):
         tensor = torch.tensor([[1, 2, 3, 13, 5], [13, 7, 13, 9, 10]])
@@ -95,6 +118,54 @@ class TestTokenwise(unittest.TestCase):
         result = zero_attention_pos_hook(pattern, hook, pos_by_batch=[[1]], head_idx=1)
         expected_result = torch.tensor([[[[1, 2], [3, 4]], [[5, 6], [7, 0]]]])
         torch.testing.assert_close(result, expected_result)
+
+    def test_compute_ablation_modified_logit_diff(self):
+        dataset = DummyDataset()
+        data_loader = DataLoader(dataset, batch_size=2)
+        layers_to_ablate = [
+            0,
+        ]
+        heads_to_freeze = [
+            (0, 0),
+        ]
+        cached_means = torch.zeros((1, 512))
+
+        (
+            orig_metric,
+            ablated_metric,
+            freeze_ablated_metric,
+        ) = compute_ablation_modified_logit_diff(
+            self.model,
+            data_loader,
+            layers_to_ablate=layers_to_ablate,
+            heads_to_freeze=list(heads_to_freeze),
+            cached_means=cached_means,
+        )
+
+        assert orig_metric.shape == ablated_metric.shape
+        assert freeze_ablated_metric is None
+        assert len(orig_metric) == len(data_loader)
+
+    def test_compute_zeroed_attn_modified_loss(self):
+        dataset = DummyDataset()
+        data_loader = DataLoader(dataset, batch_size=1)
+        heads_to_ablate = [
+            (0, 0),
+        ]
+        token_ids = [13]
+
+        loss_diff = compute_zeroed_attn_modified_loss(
+            self.model, data_loader, list(heads_to_ablate), token_ids
+        )
+
+        torch.testing.assert_close(
+            loss_diff,
+            torch.tensor(
+                [[0.0000, 0.0000], [0.0000, 0.0593], [0.0000, 0.0000], [0.0000, 0.0000]]
+            ),
+            atol=1e-4,
+            rtol=1e-4,
+        )
 
 
 if __name__ == "__main__":

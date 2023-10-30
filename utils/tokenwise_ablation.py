@@ -206,7 +206,7 @@ def compute_ablation_modified_logit_diff(
 ) -> Tuple[
     Float[Tensor, "batch *pos"],
     Float[Tensor, "batch *pos"],
-    Float[Tensor, "batch *pos"],
+    Optional[Float[Tensor, "batch *pos"]],
 ]:
     """
     Computes the change in metric (between two answers) when the activations of
@@ -232,6 +232,8 @@ def compute_ablation_modified_logit_diff(
             List of tensors of shape (batch, *pos)
             containing the metric for each item in the batch after ablation with attention frozen
     """
+    assert cached_means is not None or direction_vectors is not None
+
     orig_metric_list = []
     ablated_metric_list = []
     freeze_ablated_metric_list = []
@@ -255,7 +257,7 @@ def compute_ablation_modified_logit_diff(
                 orig_logits,
                 mask=batch_value["attention_mask"],
                 answer_tokens=batch_value["answers"],
-            )
+            ).reshape(1)
         else:
             assert metric == "loss"
             # get the loss for each token in the batch
@@ -293,7 +295,7 @@ def compute_ablation_modified_logit_diff(
                 ablated_logits,
                 mask=batch_value["attention_mask"],
                 answer_tokens=batch_value["answers"],
-            )
+            ).reshape(1)
             ablated_metric_list.append(ablated_ld)
         else:
             assert metric == "loss"
@@ -353,7 +355,7 @@ def compute_ablation_modified_logit_diff(
                     freeze_ablated_logits,
                     mask=batch_value["attention_mask"],
                     answer_tokens=batch_value["answers"],
-                )
+                ).reshape(1)
                 freeze_ablated_metric_list.append(freeze_ablated_ld)
             else:
                 assert metric == "loss"
@@ -386,10 +388,13 @@ def compute_ablation_modified_logit_diff(
 
             model.reset_hooks()
 
+    assert len(orig_metric_list) == len(ablated_metric_list)
+    assert len(orig_metric_list) == len(data_loader)
+
     return (
         torch.cat(orig_metric_list),
         torch.cat(ablated_metric_list),
-        torch.cat(freeze_ablated_metric_list),
+        torch.cat(freeze_ablated_metric_list) if frozen_attn_variant else None,
     )
 
 
