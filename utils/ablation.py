@@ -207,26 +207,29 @@ def ablate_attn_head_pos_hook(
 
 
 def ablate_resid_with_precalc_mean(
-    component: Float[Tensor, "batch pos d_model"],
+    component: Float[Tensor, "batch ..."],
     hook: HookPoint,
-    cached_means: Float[Tensor, "layer d_model"],
-    pos_by_batch: List[List[int]],
+    cached_means: Float[Tensor, "layer ..."],
+    pos_by_batch: Float[Tensor, "batch ..."],
     layer: int = 0,
-) -> Float[Tensor, "batch pos d_model"]:
+) -> Float[Tensor, "batch ..."]:
     """
     Mean-ablates a batch tensor
 
-    :param component: the tensor to compute the mean over the batch dim of
-    :return: the mean over the cache component of the tensor
+    Args:
+        component: the tensor to compute the mean over the batch dim of
+        hook: the hook point
+
+    Returns:
+        the mean over the cache component of the tensor
     """
     assert hook.name is not None and "resid" in hook.name
 
-    batch_size = component.shape[0]
-    assert len(pos_by_batch) == batch_size
+    # Identify the positions where pos_by_batch is 1
+    batch_indices, sequence_positions = torch.where(pos_by_batch == 1)
 
-    for i in range(batch_size):
-        for p in pos_by_batch[i]:
-            component[i, p, :] = cached_means[layer]
+    # Replace the corresponding positions in component with cached_means[layer]
+    component[batch_indices, sequence_positions] = cached_means[layer]
 
     return component
 
