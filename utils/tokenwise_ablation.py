@@ -14,7 +14,7 @@ from datasets import (
     Dataset,
 )
 from jaxtyping import Float, Int, Bool
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Literal, Optional, Tuple, Union
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import (
     get_dataset,
@@ -201,10 +201,15 @@ def compute_ablation_modified_logit_diff(
     direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
     multiplier=1.0,
     all_positions: bool = False,
+    metric: Literal["logits", "loss"] = "logits",
     device: torch.device = DEFAULT_DEVICE,
-) -> Tuple[Float[Tensor, "batch"], Float[Tensor, "batch"], Float[Tensor, "batch"]]:
+) -> Tuple[
+    Float[Tensor, "batch *pos"],
+    Float[Tensor, "batch *pos"],
+    Float[Tensor, "batch *pos"],
+]:
     """
-    Computes the change in logit difference (between two answers) when the activations of
+    Computes the change in metric (between two answers) when the activations of
     a particular token are mean-ablated.
 
     Args:
@@ -217,19 +222,19 @@ def compute_ablation_modified_logit_diff(
             containing the mean value of a given token for each layer
 
     Returns:
-        orig_ld_list:
-            List of tensors of shape (batch,)
-            containing the logit difference for each item in the batch before ablation
-        ablated_ld_list:
-            List of tensors of shape (batch,)
-            containing the logit difference for each item in the batch after ablation
-        freeze_ablated_ld_list:
-            List of tensors of shape (batch,)
-            containing the logit difference for each item in the batch after ablation with attention frozen
+        orig_metric_list:
+            List of tensors of shape (batch, *pos)
+            containing the metric for each item in the batch before ablation
+        ablated_metric_list:
+            List of tensors of shape (batch, *pos)
+            containing the metric for each item in the batch after ablation
+        freeze_ablated_metric_list:
+            List of tensors of shape (batch, *pos)
+            containing the metric for each item in the batch after ablation with attention frozen
     """
-    orig_ld_list = []
-    ablated_ld_list = []
-    freeze_ablated_ld_list = []
+    orig_metric_list = []
+    ablated_metric_list = []
+    freeze_ablated_metric_list = []
 
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
@@ -238,19 +243,34 @@ def compute_ablation_modified_logit_diff(
         else:
             batch_pos = batch_value["positions"].to(device)
 
-        # get the logit diff for the last token in each sequence
-        orig_logits, clean_cache = model.run_with_cache(
-            batch_tokens, return_type="logits", prepend_bos=False
-        )
-        assert isinstance(orig_logits, Tensor)
-        orig_ld = get_logit_diff(
-            orig_logits,
-            mask=batch_value["attention_mask"],
-            answer_tokens=batch_value["answers"],
-        )
-        orig_ld_list.append(orig_ld)
+        # Step 1: original metric without hooks
 
-        # repeat with tokens ablated
+        if metric == "logits":
+            # get the logit diff for the last token in each sequence
+            orig_logits, clean_cache = model.run_with_cache(
+                batch_tokens, return_type="logits", prepend_bos=False
+            )
+            assert isinstance(orig_logits, Tensor)
+            orig_metric = get_logit_diff(
+                orig_logits,
+                mask=batch_value["attention_mask"],
+                answer_tokens=batch_value["answers"],
+            )
+        else:
+            assert metric == "loss"
+            # get the loss for each token in the batch
+            orig_loss, clean_cache = model.run_with_cache(
+                batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
+            )
+            assert isinstance(orig_loss, Tensor)
+            # concatenate column of 0s
+            orig_metric = torch.cat(
+                [torch.zeros((orig_loss.shape[0], 1)).to(device), orig_loss], dim=1
+            )
+        orig_metric_list.append(orig_metric)
+
+        # Step 2: repeat with tokens ablated
+
         for layer in layers_to_ablate:
             hook = partial(
                 ablation_hook_base,
@@ -262,19 +282,47 @@ def compute_ablation_modified_logit_diff(
             )
             model.blocks[layer].hook_resid_post.add_hook(hook)
 
-        ablated_logits = model(batch_tokens, return_type="logits", prepend_bos=False)
-        # check to see if ablated_logits has any nan values
-        if torch.isnan(ablated_logits).any():
-            print("ablated logits has nan values")
-        ablated_ld = get_logit_diff(
-            ablated_logits,
-            mask=batch_value["attention_mask"],
-            answer_tokens=batch_value["answers"],
-        )
-        ablated_ld_list.append(ablated_ld)
+        if metric == "logits":
+            ablated_logits = model(
+                batch_tokens, return_type="logits", prepend_bos=False
+            )
+            # check to see if ablated_logits has any nan values
+            if torch.isnan(ablated_logits).any():
+                print("ablated logits has nan values")
+            ablated_ld = get_logit_diff(
+                ablated_logits,
+                mask=batch_value["attention_mask"],
+                answer_tokens=batch_value["answers"],
+            )
+            ablated_metric_list.append(ablated_ld)
+        else:
+            assert metric == "loss"
+            # get the loss for each token when run with hooks
+            hooked_loss = model(
+                batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
+            )
+            # concatenate column of 0s
+            hooked_loss = torch.cat(
+                [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
+            )
+            loss_diff = hooked_loss - orig_metric
+            shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
+            shifted_batch_pos[
+                :, 0
+            ] = 0  # Set the first column to zero because roll is circular
+
+            # Zero out loss_diff positions
+            # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
+            loss_diff[shifted_batch_pos == 1] = 0
+
+            # set all masked positions to zero
+            loss_diff[batch_value["attention_mask"] == 0] = 0
+
+            ablated_metric_list.append(loss_diff)
 
         model.reset_hooks()
 
+        # Step 3: repeat with ablation and frozen attention
         if frozen_attn_variant:
             # repeat with attention frozen and tokens ablated
             for layer, head in heads_to_freeze:
@@ -292,27 +340,56 @@ def compute_ablation_modified_logit_diff(
                     cached_means=cached_means,
                     direction_vectors=direction_vectors,
                     multiplier=multiplier,
-                    pos_by_batch=batch_pos,
+                    pos_mask=batch_pos,
                     layer=layer,
                 )
                 model.blocks[layer].hook_resid_post.add_hook(hook)
 
-            freeze_ablated_logits = model(
-                batch_tokens, return_type="logits", prepend_bos=False
-            )
-            freeze_ablated_ld = get_logit_diff(
-                freeze_ablated_logits,
-                mask=batch_value["attention_mask"],
-                answer_tokens=batch_value["answers"],
-            )
-            freeze_ablated_ld_list.append(freeze_ablated_ld)
+            if metric == "logits":
+                freeze_ablated_logits = model(
+                    batch_tokens, return_type="logits", prepend_bos=False
+                )
+                freeze_ablated_ld = get_logit_diff(
+                    freeze_ablated_logits,
+                    mask=batch_value["attention_mask"],
+                    answer_tokens=batch_value["answers"],
+                )
+                freeze_ablated_metric_list.append(freeze_ablated_ld)
+            else:
+                assert metric == "loss"
+                # get the loss for each token when run with hooks
+                hooked_loss = model(
+                    batch_tokens,
+                    return_type="loss",
+                    prepend_bos=False,
+                    loss_per_token=True,
+                )
+                # concatenate column of 0s
+                hooked_loss = torch.cat(
+                    [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss],
+                    dim=1,
+                )
+                loss_diff = hooked_loss - orig_metric
+                shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
+                shifted_batch_pos[
+                    :, 0
+                ] = 0  # Set the first column to zero because roll is circular
+
+                # Zero out loss_diff positions
+                # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
+                loss_diff[shifted_batch_pos == 1] = 0
+
+                # set all masked positions to zero
+                loss_diff[batch_value["attention_mask"] == 0] = 0
+
+                freeze_ablated_metric_list.append(loss_diff)
 
             model.reset_hooks()
 
     return (
-        torch.cat(orig_ld_list),
-        torch.cat(ablated_ld_list),
-        torch.cat(freeze_ablated_ld_list),
+        torch.cat(orig_metric_list),
+        torch.cat(ablated_metric_list),
+        torch.cat(freeze_ablated_metric_list),
     )
 
 
@@ -355,95 +432,3 @@ def compute_zeroed_attn_modified_loss(
 
     model.reset_hooks()
     return torch.cat(loss_list)
-
-
-def compute_mean_ablation_modified_loss(
-    model: HookedTransformer,
-    data_loader: DataLoader,
-    layers_to_ablate: List[int],
-    cached_means: Float[Tensor, "layer d_model"],
-    debug: bool = False,
-    device: torch.device = DEFAULT_DEVICE,
-) -> Tuple[Float[Tensor, "batch"], Float[Tensor, "batch"]]:
-    """Computes the change in loss when the activations of a particular token are mean-ablated.
-
-    Args:
-        model: HookedTransformer model
-        data_loader: DataLoader for the dataset
-        layers_to_ablate: List of layers to ablate
-        cached_means: List of tensors of shape (layer, d_model) containing the mean value of a given token for each layer
-
-    Returns:
-        loss_diff_list: List of tensors of shape (batch,) containing the loss difference for each item in the batch
-        orig_loss_list: List of tensors of shape (batch,) containing the original loss for each item in the batch
-    """
-    loss_diff_list = []
-    orig_loss_list = []
-    for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
-        batch_tokens = batch_value["tokens"].to(device)
-        batch_pos = batch_value["positions"].to(device)
-
-        # get the loss for each token in the batch
-        initial_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
-        )
-        # concatenate column of 0s
-        initial_loss = torch.cat(
-            [torch.zeros((initial_loss.shape[0], 1)).to(device), initial_loss], dim=1
-        )
-
-        if debug:
-            print(f"initial loss shape: {initial_loss.shape}")
-            print(initial_loss[0])
-        orig_loss_list.append(initial_loss)
-
-        # add hooks for the activations of the relevant tokens
-        for layer in layers_to_ablate:
-            mean_ablate_token = partial(
-                ablate_resid_with_precalc_mean,
-                cached_means=cached_means,
-                pos_by_batch=batch_pos,
-                layer=layer,
-            )
-            model.blocks[layer].hook_resid_post.add_hook(mean_ablate_token)
-
-        # get the loss for each token when run with hooks
-        hooked_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
-        )
-        # concatenate column of 0s
-        hooked_loss = torch.cat(
-            [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
-        )
-
-        if debug:
-            print(f"hooked loss shape: {hooked_loss.shape}")
-            print(hooked_loss[0])
-
-        # compute the difference between the two losses
-        loss_diff = hooked_loss - initial_loss
-
-        # set all positions right after batch_pos to zero
-        if debug:
-            print(f"batch pos: {batch_pos}")
-        # use the batch_pos tensor to set all positions right after batch_pos==1 to zero
-        # enter code here
-        # Step 1: Shift batch_pos tensor
-        # We use roll to shift the tensor. We pad the first column with zeros after the roll since roll is circular.
-        shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
-        shifted_batch_pos[
-            :, 0
-        ] = 0  # Set the first column to zero because roll is circular
-
-        # Step 2: Zero out loss_diff positions
-        # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
-        loss_diff[shifted_batch_pos == 1] = 0
-
-        # set all masked positions to zero
-        loss_diff[batch_value["attention_mask"] == 0] = 0
-
-        loss_diff_list.append(loss_diff)
-
-        model.reset_hooks()
-
-    return torch.cat(loss_diff_list), torch.cat(orig_loss_list)
