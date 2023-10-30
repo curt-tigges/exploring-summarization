@@ -48,7 +48,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # -------------------- GENERAL UTILS --------------------
 def find_positions(
     batch_tensor: Float[Tensor, "batch seq_len"], token_ids: List = [13]
-) -> List[List[List[int]]]:
+) -> List[List[int]]:
     """Finds positions of specified token ids in a tensor of shape (batch, sequence_position)
 
     Args:
@@ -56,19 +56,15 @@ def find_positions(
         token_ids: List of token ids to find positions of
 
     Returns:
-        positions:
-            nested list
-            outer list is batch size
-            middle list is token id
-            inner list is positions of token id in sequence
+        positions: [batch, pos] nested list
     """
     positions = []
     for batch_item in batch_tensor:
-        token_positions = {token_id: [] for token_id in token_ids}
+        batch_positions = []
         for position, token in enumerate(batch_item):
             if token.item() in token_ids:
-                token_positions[token.item()].append(position)
-        positions.append([token_positions[token_id] for token_id in token_ids])
+                batch_positions.append(position)
+        positions.append(batch_positions)
     return positions
 
 
@@ -166,12 +162,10 @@ def get_layerwise_token_mean_activations(
     num_layers = model.cfg.n_layers
     d_model = model.cfg.d_model
 
-    activation_sums = torch.stack([torch.zeros(d_model) for _ in range(num_layers)]).to(
-        device
-    )
+    activation_sums: Float[Tensor, "layer d_model"] = torch.stack(
+        [torch.zeros(d_model) for _ in range(num_layers)]
+    ).to(device=device, dtype=torch.float32)
     token_counts = [0] * num_layers
-
-    print(activation_sums.shape)
 
     token_mean_values = torch.zeros((num_layers, d_model))
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
@@ -183,7 +177,7 @@ def get_layerwise_token_mean_activations(
         _, cache = model.run_with_cache(batch_tokens, names_filter=names_filter)
 
         for i in range(batch_tokens.shape[0]):
-            for p in punct_pos[i][0]:
+            for p in punct_pos[i]:
                 for layer in range(num_layers):
                     activation_sums[layer] += cache[f"blocks.{layer}.hook_resid_post"][
                         i, p, :
@@ -309,6 +303,7 @@ def compute_mean_ablation_modified_logit_diff(
         orig_logits, clean_cache = model.run_with_cache(
             batch_tokens, return_type="logits", prepend_bos=False
         )
+        assert isinstance(orig_logits, Tensor)
         orig_ld = get_logit_diff(
             orig_logits,
             mask=batch_value["attention_mask"],
@@ -414,6 +409,7 @@ def compute_directional_ablation_modified_logit_diff(
         orig_logits, clean_cache = model.run_with_cache(
             batch_tokens, return_type="logits", prepend_bos=False
         )
+        assert isinstance(orig_logits, Tensor)
         orig_ld = get_logit_diff(
             orig_logits,
             mask=batch_value["attention_mask"],
@@ -507,6 +503,7 @@ def compute_directional_ablation_modified_logit_diff_all_pos(
         orig_logits, clean_cache = model.run_with_cache(
             batch_tokens, return_type="logits", prepend_bos=False
         )
+        assert isinstance(orig_logits, Tensor)
         orig_ld = get_logit_diff(
             orig_logits,
             mask=batch_value["attention_mask"],
@@ -580,13 +577,14 @@ def compute_directional_ablation_modified_logit_diff_all_pos(
 
 
 def compute_zeroed_attn_modified_loss(
-    model: HookedTransformer, data_loader: DataLoader, heads_to_ablate
+    model: HookedTransformer,
+    data_loader: DataLoader,
+    heads_to_ablate: List[Tuple[int, int]],
 ) -> float:
     loss_list = []
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
 
-        # get positions of all 11 and 13 token ids in batch
         punct_pos = find_positions(batch_tokens, token_ids=[13])
 
         # get the loss for each token in the batch
