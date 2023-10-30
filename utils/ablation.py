@@ -7,6 +7,7 @@ from transformer_lens.hook_points import HookPoint
 from transformer_lens import ActivationCache
 from transformer_lens.utils import get_act_name
 from datasets import Dataset, Features, Sequence, Value
+from utils.cache import resid_names_filter
 
 
 def handle_position(
@@ -234,11 +235,6 @@ def ablate_resid_with_precalc_mean(
     component[batch_indices, sequence_positions] = cached_means[layer]
 
     return component
-
-
-def names_filter(name: str):
-    """Filter for the names of the activations we want to keep to study the resid stream."""
-    return name.endswith("resid_post") or name == get_act_name("resid_pre", 0)
 
 
 def convert_to_tensors(

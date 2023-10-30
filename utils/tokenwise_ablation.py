@@ -35,6 +35,7 @@ from utils.store import (
     clean_label,
     save_text,
 )
+from utils.cache import resid_names_filter
 from utils.circuit_analysis import get_logit_diff
 from utils.ablation import (
     ablate_resid_with_precalc_mean,
@@ -67,26 +68,6 @@ def find_positions(
                 batch_positions.append(position)
         positions.append(batch_positions)
     return positions
-
-
-def names_filter(
-    name: str, permitted_names: List = ["resid_post", "resid_pre"]
-) -> bool:
-    """Filter for the names of the activations we want to keep to study the resid stream.
-
-    Args:
-        name (str): Name of the activation to check
-        permitted_names (List, optional): List of names (or suffixes) to keep. Defaults to ['resid_post', 'resid_pre'].
-
-    Returns:
-        bool: True if name is in permitted_names, False otherwise
-    """
-    # check all names with endswith
-    for permitted_name in permitted_names:
-        if name.endswith(permitted_name):
-            return True
-
-    return False
 
 
 # -------------------- DIRECTION LOADING UTILS --------------------
@@ -181,7 +162,7 @@ def get_layerwise_token_mean_activations(
         # get positions of all specified token ids in batch
         token_pos = find_positions(batch_tokens, token_ids=[token_id])
 
-        _, cache = model.run_with_cache(batch_tokens, names_filter=names_filter)
+        _, cache = model.run_with_cache(batch_tokens, names_filter=resid_names_filter)
 
         for i in range(batch_tokens.shape[0]):
             for p in token_pos[i]:
