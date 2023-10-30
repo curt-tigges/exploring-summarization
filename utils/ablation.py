@@ -98,7 +98,7 @@ def freeze_attn_pattern_hook(
 
 
 def freeze_layer_pos_hook(
-    component: Float[Tensor, "batch pos ..."],
+    component: Float[Tensor, "batch pos d_model"],
     hook: HookPoint,
     cache: ActivationCache,
     component_type: str = "hook_resid_post",
@@ -241,7 +241,9 @@ def names_filter(name: str):
     return name.endswith("resid_post") or name == get_act_name("resid_pre", 0)
 
 
-def convert_to_tensors(dataset: Dataset, column_name="tokens"):
+def convert_to_tensors(
+    dataset: Union[Dataset, List[Dict[str, List[int]]]], column_name="tokens"
+):
     final_batches = []
 
     for batch in dataset:
