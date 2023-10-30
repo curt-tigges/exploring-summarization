@@ -7,6 +7,7 @@ from transformer_lens.hook_points import HookPoint
 from transformer_lens import ActivationCache
 from transformer_lens.utils import get_act_name
 from datasets import Dataset, Features, Sequence, Value
+import einops
 from utils.cache import resid_names_filter
 
 
@@ -209,11 +210,11 @@ def ablate_attn_head_pos_hook(
     return component
 
 
-def ablate_resid_with_precalc_mean(
-    component: Float[Tensor, "batch ..."],
+def _ablate_resid_with_precalc_mean(
+    component: Float[Tensor, "batch pos d_model"],
     hook: HookPoint,
-    cached_means: Float[Tensor, "layer ..."],
-    pos_by_batch: Int[Tensor, "batch ..."],
+    cached_means: Float[Tensor, "layer d_model"],
+    pos_mask: Int[Tensor, "batch pos"],
     layer: int = 0,
 ) -> Float[Tensor, "batch ..."]:
     """
@@ -229,12 +230,103 @@ def ablate_resid_with_precalc_mean(
     assert hook.name is not None and "resid" in hook.name
 
     # Identify the positions where pos_by_batch is 1
-    batch_indices, sequence_positions = torch.where(pos_by_batch == 1)
+    batch_indices, sequence_positions = torch.where(pos_mask == 1)
 
     # Replace the corresponding positions in component with cached_means[layer]
     component[batch_indices, sequence_positions] = cached_means[layer]
 
     return component
+
+
+def _ablate_resid_with_direction(
+    component: Float[Tensor, "batch pos d_model"],
+    hook: HookPoint,
+    direction_vector: Float[Tensor, "layer d_model"],
+    pos_mask: Int[Tensor, "batch pos"],
+    multiplier: float = 1.0,
+    layer: int = 0,
+) -> Float[Tensor, "batch ..."]:
+    """
+    Ablates a batch tensor by removing the influence of a direction vector from it.
+
+    Args:
+        component: the tensor to compute the mean over the batch dim of
+        direction_vector: the direction vector to remove from the component
+        multiplier: the multiplier to apply to the direction vector
+        pos_by_batch: the positions to ablate
+        layer: the layer to ablate
+
+    Returns:
+        the ablated component
+    """
+    assert hook.name is not None and "resid" in hook.name
+
+    # Normalize the direction vector to make sure it's a unit vector
+    D_normalized = direction_vector[layer] / torch.norm(direction_vector[layer])
+
+    # Calculate the projection of component onto direction_vector
+    proj = (
+        einops.einsum(component, D_normalized, "b s d, d -> b s").unsqueeze(-1)
+        * D_normalized
+    )
+
+    # Ablate the direction from component
+    component_ablated = (
+        component.clone()
+    )  # Create a copy to ensure original is not modified
+    batch_indices, sequence_positions = torch.where(pos_mask == 1)
+    component_ablated[batch_indices, sequence_positions] = (
+        component[batch_indices, sequence_positions]
+        - multiplier * proj[batch_indices, sequence_positions]
+    )
+
+    # Check that positions not in (batch_indices, sequence_positions) were not ablated
+    check_mask = torch.ones_like(component, dtype=torch.bool)
+    check_mask[batch_indices, sequence_positions] = 0
+    if not torch.all(component[check_mask] == component_ablated[check_mask]):
+        raise ValueError(
+            "Positions outside of specified (batch_indices, sequence_positions) were ablated!"
+        )
+
+    return component_ablated
+
+
+def ablation_hook_base(
+    component: Float[Tensor, "batch pos d_model"],
+    hook: HookPoint,
+    pos_mask: Int[Tensor, "batch pos"],
+    cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
+    direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
+    multiplier: float = 1.0,
+    layer: int = 0,
+) -> Float[Tensor, "batch ..."]:
+    """
+    Ablates a batch tensor by removing the influence of a direction vector from it.
+
+    Args:
+        component: the tensor to compute the mean over the batch dim of
+        hook: the hook point
+        pos_by_batch: the positions to ablate
+        cached_means: the cached means to use for ablation
+        direction_vector: the direction vector to remove from the component
+        multiplier: the multiplier to apply to the direction vector
+        layer: the layer to ablate
+
+    Returns:
+        the ablated component
+    """
+    assert hook.name is not None and "resid" in hook.name
+
+    if cached_means is not None:
+        return _ablate_resid_with_precalc_mean(
+            component, hook, cached_means, pos_mask, layer
+        )
+    elif direction_vectors is not None:
+        return _ablate_resid_with_direction(
+            component, hook, direction_vectors, pos_mask, multiplier, layer
+        )
+    else:
+        raise ValueError("Must specify either cached_means or direction_vector")
 
 
 def convert_to_tensors(
