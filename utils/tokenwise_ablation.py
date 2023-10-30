@@ -296,7 +296,7 @@ def compute_mean_ablation_modified_logit_diff(
 
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
-        punct_pos = batch_value["positions"].to(device)
+        batch_pos = batch_value["positions"].to(device)
 
         # get the logit diff for the last token in each sequence
         orig_logits, clean_cache = model.run_with_cache(
@@ -310,15 +310,15 @@ def compute_mean_ablation_modified_logit_diff(
         )
         orig_ld_list.append(orig_ld)
 
-        # repeat with commas ablated
+        # repeat with tokens ablated
         for layer in layers_to_ablate:
-            mean_ablate_comma = partial(
+            mean_ablate_tokens = partial(
                 ablate_resid_with_precalc_mean,
                 cached_means=cached_means,
-                pos_by_batch=punct_pos,
+                pos_by_batch=batch_pos,
                 layer=layer,
             )
-            model.blocks[layer].hook_resid_post.add_hook(mean_ablate_comma)
+            model.blocks[layer].hook_resid_post.add_hook(mean_ablate_tokens)
 
         ablated_logits = model(batch_tokens, return_type="logits", prepend_bos=False)
         ablated_ld = get_logit_diff(
@@ -331,7 +331,7 @@ def compute_mean_ablation_modified_logit_diff(
         model.reset_hooks()
 
         if frozen_attn_variant:
-            # repeat with attention frozen and commas ablated
+            # repeat with attention frozen and tokens ablated
             for layer, head in heads_to_freeze:
                 freeze_attn = partial(
                     freeze_attn_pattern_hook,
@@ -342,13 +342,13 @@ def compute_mean_ablation_modified_logit_diff(
                 model.blocks[layer].attn.hook_pattern.add_hook(freeze_attn)
 
             for layer in layers_to_ablate:
-                mean_ablate_comma = partial(
+                mean_ablate_tokens = partial(
                     ablate_resid_with_precalc_mean,
                     cached_means=cached_means,
-                    pos_by_batch=punct_pos,
+                    pos_by_batch=batch_pos,
                     layer=layer,
                 )
-                model.blocks[layer].hook_resid_post.add_hook(mean_ablate_comma)
+                model.blocks[layer].hook_resid_post.add_hook(mean_ablate_tokens)
 
             freeze_ablated_logits = model(
                 batch_tokens, return_type="logits", prepend_bos=False
@@ -402,8 +402,7 @@ def compute_directional_ablation_modified_logit_diff(
 
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
-        labels = batch_value["label"].to(device)
-        punct_pos = batch_value["positions"].to(device)
+        batch_pos = batch_value["positions"].to(device)
 
         # get the logit diff for the last token in each sequence
         orig_logits, clean_cache = model.run_with_cache(
@@ -419,14 +418,14 @@ def compute_directional_ablation_modified_logit_diff(
 
         # repeat with token ablated
         for layer in layers_to_ablate:
-            dir_ablate_comma = partial(
+            dir_ablate_tokens = partial(
                 ablate_resid_with_direction,
                 direction_vector=direction_vectors,
                 multiplier=multiplier,
-                pos_by_batch=punct_pos,
+                pos_by_batch=batch_pos,
                 layer=layer,
             )
-            model.blocks[layer].hook_resid_post.add_hook(dir_ablate_comma)
+            model.blocks[layer].hook_resid_post.add_hook(dir_ablate_tokens)
 
         ablated_logits = model(batch_tokens, return_type="logits", prepend_bos=False)
         # check to see if ablated_logits has any nan values
@@ -453,14 +452,14 @@ def compute_directional_ablation_modified_logit_diff(
                 model.blocks[layer].attn.hook_pattern.add_hook(freeze_attn)
 
             for layer in layers_to_ablate:
-                dir_ablate_comma = partial(
+                dir_ablate_tokens = partial(
                     ablate_resid_with_direction,
                     direction_vector=direction_vectors,
                     multiplier=multiplier,
-                    pos_by_batch=punct_pos,
+                    pos_by_batch=batch_pos,
                     layer=layer,
                 )
-                model.blocks[layer].hook_resid_post.add_hook(dir_ablate_comma)
+                model.blocks[layer].hook_resid_post.add_hook(dir_ablate_tokens)
 
             freeze_ablated_logits = model(
                 batch_tokens, return_type="logits", prepend_bos=False
@@ -497,8 +496,7 @@ def compute_directional_ablation_modified_logit_diff_all_pos(
 
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
-        labels = batch_value["label"].to(device)
-        punct_pos = batch_value["attention_mask"].to(device)
+        batch_pos = batch_value["attention_mask"].to(device)
 
         # get the logit diff for the last token in each sequence
         orig_logits, clean_cache = model.run_with_cache(
@@ -512,16 +510,16 @@ def compute_directional_ablation_modified_logit_diff_all_pos(
         )
         orig_ld_list.append(orig_ld)
 
-        # repeat with commas ablated
+        # repeat with tokens ablated
         for layer in layers_to_ablate:
-            dir_ablate_comma = partial(
+            dir_ablate_tokens = partial(
                 ablate_resid_with_direction,
                 direction_vector=direction_vectors,
                 multiplier=multiplier,
-                pos_by_batch=punct_pos,
+                pos_by_batch=batch_pos,
                 layer=layer,
             )
-            model.blocks[layer].hook_resid_post.add_hook(dir_ablate_comma)
+            model.blocks[layer].hook_resid_post.add_hook(dir_ablate_tokens)
 
         ablated_logits = model(batch_tokens, return_type="logits", prepend_bos=False)
 
@@ -538,7 +536,7 @@ def compute_directional_ablation_modified_logit_diff_all_pos(
         model.reset_hooks()
 
         if frozen_attn_variant:
-            # repeat with attention frozen and commas ablated
+            # repeat with attention frozen and tokens ablated
             for layer, head in heads_to_freeze:
                 freeze_attn = partial(
                     freeze_attn_pattern_hook,
@@ -549,14 +547,14 @@ def compute_directional_ablation_modified_logit_diff_all_pos(
                 model.blocks[layer].attn.hook_pattern.add_hook(freeze_attn)
 
             for layer in layers_to_ablate:
-                dir_ablate_comma = partial(
+                dir_ablate_tokens = partial(
                     ablate_resid_with_direction,
                     direction_vector=direction_vectors,
                     multiplier=multiplier,
-                    pos_by_batch=punct_pos,
+                    pos_by_batch=batch_pos,
                     layer=layer,
                 )
-                model.blocks[layer].hook_resid_post.add_hook(dir_ablate_comma)
+                model.blocks[layer].hook_resid_post.add_hook(dir_ablate_tokens)
 
             freeze_ablated_logits = model(
                 batch_tokens, return_type="logits", prepend_bos=False
@@ -587,7 +585,7 @@ def compute_zeroed_attn_modified_loss(
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
 
-        punct_pos = find_positions(batch_tokens, token_ids=[13])
+        batch_pos = find_positions(batch_tokens, token_ids=[13])
 
         # get the loss for each token in the batch
         initial_loss = model(
@@ -596,12 +594,12 @@ def compute_zeroed_attn_modified_loss(
 
         # add hooks for the activations of the 11 and 13 tokens
         for layer, head in heads_to_ablate:
-            ablate_punct = partial(
+            ablate_tokens = partial(
                 zero_attention_pos_hook,
-                pos_by_batch=punct_pos,
+                pos_by_batch=batch_pos,
                 head_idx=head,
             )
-            model.blocks[layer].attn.hook_pattern.add_hook(ablate_punct)
+            model.blocks[layer].attn.hook_pattern.add_hook(ablate_tokens)
 
         # get the loss for each token when run with hooks
         hooked_loss = model(
@@ -641,7 +639,7 @@ def compute_mean_ablation_modified_loss(
     orig_loss_list = []
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
-        punct_pos = batch_value["positions"].to(device)
+        batch_pos = batch_value["positions"].to(device)
 
         # get the loss for each token in the batch
         initial_loss = model(
@@ -662,7 +660,7 @@ def compute_mean_ablation_modified_loss(
             mean_ablate_token = partial(
                 ablate_resid_with_precalc_mean,
                 cached_means=cached_means,
-                pos_by_batch=punct_pos,
+                pos_by_batch=batch_pos,
                 layer=layer,
             )
             model.blocks[layer].hook_resid_post.add_hook(mean_ablate_token)
@@ -683,21 +681,21 @@ def compute_mean_ablation_modified_loss(
         # compute the difference between the two losses
         loss_diff = hooked_loss - initial_loss
 
-        # set all positions right after punct_pos to zero
+        # set all positions right after batch_pos to zero
         if debug:
-            print(f"punct pos: {punct_pos}")
-        # use the punct_pos tensor to set all positions right after punct_pos==1 to zero
+            print(f"batch pos: {batch_pos}")
+        # use the batch_pos tensor to set all positions right after batch_pos==1 to zero
         # enter code here
-        # Step 1: Shift punct_pos tensor
+        # Step 1: Shift batch_pos tensor
         # We use roll to shift the tensor. We pad the first column with zeros after the roll since roll is circular.
-        shifted_punct_pos = torch.roll(punct_pos, shifts=1, dims=1)
-        shifted_punct_pos[
+        shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
+        shifted_batch_pos[
             :, 0
         ] = 0  # Set the first column to zero because roll is circular
 
         # Step 2: Zero out loss_diff positions
-        # Use the shifted_punct_pos tensor to mask loss_diff and set those positions to zero.
-        loss_diff[shifted_punct_pos == 1] = 0
+        # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
+        loss_diff[shifted_batch_pos == 1] = 0
 
         # set all masked positions to zero
         loss_diff[batch_value["attention_mask"] == 0] = 0
