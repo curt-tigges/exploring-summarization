@@ -580,7 +580,7 @@ def compute_zeroed_attn_modified_loss(
     model: HookedTransformer,
     data_loader: DataLoader,
     heads_to_ablate: List[Tuple[int, int]],
-) -> float:
+) -> Float[Tensor, "batch"]:
     loss_list = []
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
@@ -612,7 +612,7 @@ def compute_zeroed_attn_modified_loss(
         loss_list.append(loss_diff)
 
     model.reset_hooks()
-    return loss_list, batch_tokens
+    return torch.cat(loss_list)
 
 
 def compute_mean_ablation_modified_loss(
