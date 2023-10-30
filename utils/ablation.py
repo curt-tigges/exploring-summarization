@@ -14,8 +14,10 @@ def handle_position(
     component: Int[Tensor, "batch pos ..."],
 ) -> Int[Tensor, "subset_pos"]:
     """Handles the position argument for ablation functions"""
-    if isinstance(pos, int) or isinstance(pos, list):
+    if isinstance(pos, int):
         pos = torch.tensor([pos])
+    elif isinstance(pos, list):
+        pos = torch.tensor(pos)
     elif pos == "each":
         pos = torch.tensor(list(range(component.shape[1])))
     return pos
@@ -210,7 +212,7 @@ def ablate_resid_with_precalc_mean(
     component: Float[Tensor, "batch ..."],
     hook: HookPoint,
     cached_means: Float[Tensor, "layer ..."],
-    pos_by_batch: Float[Tensor, "batch ..."],
+    pos_by_batch: Int[Tensor, "batch ..."],
     layer: int = 0,
 ) -> Float[Tensor, "batch ..."]:
     """
