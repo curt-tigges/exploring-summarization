@@ -97,7 +97,8 @@ class TestTokenwise(unittest.TestCase):
             None,
             {
                 "blocks.0.hook_resid_post": torch.tensor(
-                    [[[1], [2], [3], [4]], [[5], [6], [7], [8]]]
+                    [[[1], [2], [3], [4]], [[5], [6], [7], [8]]],
+                    dtype=torch.float32,
                 ),
             },
         )
