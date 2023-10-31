@@ -136,15 +136,14 @@ def get_layerwise_token_mean_activations(
     activation_sums: Float[Tensor, "layer d_model"] = torch.zeros(
         (num_layers, d_model), device=device, dtype=torch.float32
     )
-    token_counts: Float[Tensor, "layer"] = torch.zeros(
-        num_layers, device=device, dtype=torch.float32
-    )
+    token_count: int = 0
 
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
 
         # Get binary mask of positions where token_id matches in the batch of tokens
-        token_mask = (batch_tokens == token_id).float()
+        token_mask = batch_tokens == token_id
+        token_count += token_mask.sum()
 
         _, cache = model.run_with_cache(batch_tokens, names_filter=resid_names_filter)
 
@@ -152,12 +151,11 @@ def get_layerwise_token_mean_activations(
             layer_activations = cache[f"blocks.{layer}.hook_resid_post"]
             activation_sums[layer] += einops.einsum(
                 layer_activations,
-                token_mask,
+                token_mask.float(),
                 "batch seq d_model, batch seq -> d_model",
             )
-            token_counts[layer] += token_mask.sum()
 
-    token_mean_values = activation_sums / token_counts.unsqueeze(-1)
+    token_mean_values = activation_sums / token_count
 
     return token_mean_values
 
