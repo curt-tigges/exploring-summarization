@@ -112,6 +112,7 @@ class TestTokenwise(unittest.TestCase):
             self.model, data_loader, token_id=2
         )
         expected_result = torch.tensor([[4.5]])
+        self.model.cfg.d_model = 512
         torch.testing.assert_close(result, expected_result)
 
     def test_zero_attention_pos_hook(self):
