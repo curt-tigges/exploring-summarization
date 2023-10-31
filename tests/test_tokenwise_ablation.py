@@ -101,18 +101,16 @@ class TestTokenwise(unittest.TestCase):
                 ),
             },
         )
-        self.model.cfg.d_model = 1
+        model = HookedTransformer.from_pretrained("gelu-1l")
+        model.cfg.d_model = 1
 
         data_loader = MockDataLoader(
             [
                 {"tokens": torch.tensor([[1, 2, 3, 4], [5, 6, 2, 7]])},
             ]
         )
-        result = get_layerwise_token_mean_activations(
-            self.model, data_loader, token_id=2
-        )
+        result = get_layerwise_token_mean_activations(model, data_loader, token_id=2)
         expected_result = torch.tensor([[4.5]])
-        self.model.cfg.d_model = 512
         torch.testing.assert_close(result, expected_result)
 
     def test_zero_attention_pos_hook(self):
