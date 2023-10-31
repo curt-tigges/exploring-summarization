@@ -64,8 +64,8 @@ class ExperimentData:
     def get_datasets(self) -> Dict[str, datasets.Dataset]:
         return self.dataset_dict
 
-
-    def _find_dataset_positions(example, token_id: int):
+    @staticmethod
+    def _find_dataset_positions(token_id, example):
         # Create a tensor of zeros with the same shape as example['tokens']
         positions = torch.zeros_like(torch.tensor(example['tokens']), dtype=torch.int)
 
