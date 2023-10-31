@@ -78,13 +78,6 @@ class ExperimentData(ABC):
 
     def preprocess_datasets(self, token_to_ablate: Optional[int] = None):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
-        assert (
-            "tokens" in self.dataset_dict["train"].column_names
-        ), "Dataset does not have a 'tokens' column"
-        assert (
-            "positions" in self.dataset_dict["train"].column_names
-        ), "Dataset does not have a 'positions' column in the train split"
-
         self._tokenize()
         self.apply_function(self._create_attention_mask)
 
@@ -93,6 +86,14 @@ class ExperimentData(ABC):
                 self._find_dataset_positions, token_to_ablate=token_to_ablate
             )
             self.apply_function(find_dataset_positions, batched=False)
+
+        example_ds = list(owt_data.dataset_dict.values())[0]
+        assert (
+            "tokens" in example_ds.column_names
+        ), "Dataset does not have a 'tokens' column"
+        assert (
+            "positions" in example_ds.column_names
+        ), "Dataset does not have a 'positions' column in the train split"
 
     def get_dataloaders(self, batch_size: int) -> Dict[str, DataLoader]:
         """Returns a dictionary of dataloaders for each split"""
