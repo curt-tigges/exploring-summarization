@@ -40,7 +40,7 @@ class ExperimentData:
         """Finds the positions of a given token in the dataset"""
         self.token_to_ablate = token_to_ablate
         for split in self.dataset_dict.keys():
-            self.dataset_dict[split] = self.dataset_dict[split].map(self._find_dataset_position)
+            self.dataset_dict[split] = self.dataset_dict[split].map(self._find_dataset_positions)
 
         assert 'positions' in self.dataset_dict['train'].column_names, "Dataset does not have a 'positions' column"
 
