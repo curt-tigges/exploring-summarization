@@ -33,6 +33,7 @@ class ExperimentData:
         assert 'tokens' in self.dataset_dict['train'].column_names, "Dataset does not have a 'tokens' column"
 
         if token_to_ablate is not None:
+            self.token_to_ablate = token_to_ablate
             for split in self.dataset_dict.keys():
                 self.dataset_dict[split] = self.dataset_dict[split].map(self._find_dataset_positions)
 
@@ -40,7 +41,7 @@ class ExperimentData:
         """Finds the positions of a given token in the dataset"""
         self.token_to_ablate = token_to_ablate
         for split in self.dataset_dict.keys():
-            self.dataset_dict[split] = self.dataset_dict[split].map(self._find_dataset_positions)
+            self.dataset_dict[split] = self.dataset_dict[split].map(self._find_dataset_positions, batched=False)
 
         assert 'positions' in self.dataset_dict['train'].column_names, "Dataset does not have a 'positions' column"
 
@@ -95,6 +96,7 @@ class OWTData(ExperimentData):
         assert 'tokens' in self.dataset_dict['train'].column_names, "Dataset does not have a 'tokens' column"
 
         if token_to_ablate is not None:
+            self.token_to_ablate = token_to_ablate
             for split in self.dataset_dict.keys():
                 self.dataset_dict[split] = self.dataset_dict[split].map(self._find_dataset_positions)
 
