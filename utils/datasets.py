@@ -177,28 +177,3 @@ class OWTData(ExperimentData):
             text_column=text_column,
             label_column=label_column,
         )
-
-
-# class CEBaBData(ExperimentData):
-
-
-# TODO: Finish this class stub if we want to use it
-# class SSTData(ExperimentData):
-#     def __init__(self, dataset_dict: DatasetDict, text_column: str = 'text', label_column: str = 'label'):
-#         super().__init__(dataset_dict, text_column, label_column)
-#         self.dataset_dict = dataset_dict
-
-#     def _filter_function(example: Dict):
-#         prompt = model.to_tokens(example['text'] + " Review Sentiment:", prepend_bos=False)
-#         answer = torch.tensor([29071, 32725]).unsqueeze(0).unsqueeze(0).to(device) if example['label'] == 1 else torch.tensor([32725, 29071]).unsqueeze(0).unsqueeze(0).to(device)
-#         logits, cache = model.run_with_cache(prompt)
-#         logit_diff = get_logit_diff(logits, answer)
-
-#         # Determine if the top answer (index 0) token is in top 10 logits
-#         _, top_indices = logits.topk(10, dim=-1)  # Get indices of top 10 logits
-#         top_answer_token = answer[0, 0, 0]  # Assuming answer is of shape (1, 1, 2) and the top answer token is at index 0
-#         is_top_answer_in_top_10_logits = (top_indices == top_answer_token).any()
-
-#         # Add a new field 'keep_example' to the example
-#         example['keep_example'] = (logit_diff > 0.0) and is_top_answer_in_top_10_logits.item()
-#         return example
