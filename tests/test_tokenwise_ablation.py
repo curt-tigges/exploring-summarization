@@ -80,10 +80,12 @@ class TestTokenwise(unittest.TestCase):
         torch.testing.assert_close(result, expected_result)
 
     def test_get_random_directions(self):
+        torch.manual_seed(0)
         result = get_random_directions(self.model)
         self.assertEqual(result.shape, (1, 512))
 
     def test_get_zeroed_dir_vector(self):
+        torch.manual_seed(0)
         result = get_zeroed_dir_vector(self.model)
         expected_result = torch.zeros((1, 512))
         torch.testing.assert_close(result, expected_result)
