@@ -99,16 +99,7 @@ def get_random_directions(
     device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "layer d_model"]:
     """Returns a list of random direction vectors of shape (n_layers, d_model)"""
-    directions = []
-    num_layers = model.cfg.n_layers
-    for _ in range(num_layers):
-        dir = torch.randn(model.cfg.d_model).to(device)
-        directions.append(dir)
-
-    # convert to tensor
-    directions = torch.stack(directions).to(device)
-
-    return directions
+    return torch.randn((model.cfg.n_layers, model.cfg.d_model)).to(device)
 
 
 def get_zeroed_dir_vector(

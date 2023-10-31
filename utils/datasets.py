@@ -117,7 +117,7 @@ class ExperimentData(ABC):
     @staticmethod
     def _find_dataset_positions(example, token_to_ablate: int):
         # Create a tensor of zeros with the same shape as example['tokens']
-        positions = torch.zeros_like(torch.tensor(example["tokens"]), dtype=torch.int)
+        positions = torch.zeros_like(example["tokens"])
 
         # Find positions where tokens match the given token_id
         positions[example["tokens"] == token_to_ablate] = 1
@@ -160,9 +160,7 @@ class OWTData(ExperimentData):
             )
 
     def _create_attention_mask(self, example: Dict):
-        attention_mask = torch.ones_like(
-            torch.tensor(example["tokens"]), dtype=torch.int
-        )
+        attention_mask = torch.ones_like(example["tokens"])
         return {"attention_mask": attention_mask}
 
     @classmethod
