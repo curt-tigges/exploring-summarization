@@ -87,7 +87,7 @@ class ExperimentData(ABC):
             )
             self.apply_function(find_dataset_positions, batched=False)
 
-        example_ds = list(owt_data.dataset_dict.values())[0]
+        example_ds = list(self.dataset_dict.values())[0]
         assert (
             "tokens" in example_ds.column_names
         ), "Dataset does not have a 'tokens' column"
