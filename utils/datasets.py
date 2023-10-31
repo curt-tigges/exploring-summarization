@@ -22,6 +22,7 @@ class ExperimentData:
         self.model = model
         self.text_column = text_column
         self.label_column = label_column
+        self.token_to_ablate = None
 
 
     def preprocess_datasets(self, token_to_ablate: int = None):
@@ -37,8 +38,9 @@ class ExperimentData:
 
     def find_dataset_positions(self, token_to_ablate: int = 13):
         """Finds the positions of a given token in the dataset"""
+        self.token_to_ablate = token_to_ablate
         for split in self.dataset_dict.keys():
-            self.dataset_dict[split] = self.dataset_dict[split].map(partial(self._find_dataset_positions, token_id=token_to_ablate))
+            self.dataset_dict[split] = self.dataset_dict[split].map(self._find_dataset_position)
 
         assert 'positions' in self.dataset_dict['train'].column_names, "Dataset does not have a 'positions' column"
 
@@ -64,13 +66,13 @@ class ExperimentData:
     def get_datasets(self) -> Dict[str, datasets.Dataset]:
         return self.dataset_dict
 
-    @staticmethod
-    def _find_dataset_positions(token_id, example):
+
+    def _find_dataset_positions(self, example):
         # Create a tensor of zeros with the same shape as example['tokens']
         positions = torch.zeros_like(torch.tensor(example['tokens']), dtype=torch.int)
 
         # Find positions where tokens match the given token_id
-        positions[example['tokens'] == token_id] = 1
+        positions[example['tokens'] == self.token_id] = 1
         has_token = True if positions.sum() > 0 else False
 
         return {'positions': positions, 'has_token': has_token}
