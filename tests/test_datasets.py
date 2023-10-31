@@ -1,3 +1,4 @@
+import torch
 import unittest
 from unittest.mock import MagicMock, patch
 from utils.datasets import ExperimentData, OWTData
@@ -30,7 +31,7 @@ class TestOWTData(unittest.TestCase):
             assert self.mocked_dataset[split] == outputs[split]
 
     def test_create_attention_mask(self):
-        example = {"tokens": [1, 2, 3, 4]}
+        example = {"tokens": torch.tensor([1, 2, 3, 4], dtype=torch.long)}
         owt_data = OWTData(self.mocked_dataset, self.mocked_model)
         result = owt_data._create_attention_mask(example)
         self.assertEqual(result["attention_mask"].tolist(), [1, 1, 1, 1])
