@@ -4,7 +4,7 @@ import torch
 import datasets
 from torch import Tensor
 from torch.utils.data import DataLoader
-from datasets import load_dataset, concatenate_datasets, load_from_disk
+from datasets import load_dataset, concatenate_datasets, load_from_disk, DatasetDict
 from jaxtyping import Float, Int, Bool
 from typing import Dict, Iterable, List, Tuple, Union
 from transformer_lens import HookedTransformer
