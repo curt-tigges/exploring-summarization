@@ -17,6 +17,8 @@ from utils.store import load_array, save_html, save_array, is_file, get_model_na
 from utils.circuit_analysis import get_logit_diff
 
 class ExperimentData:
+    """Base class for experiment data. This class should not be instantiated directly, but should be subclassed instead.
+    Subclasses should implement the _preprocess_function() method, which should return a dictionary with a 'tokens' column."""
     def __init__(self, dataset_dict: DatasetDict, model, text_column: str = 'text', label_column: str = None):
         self.dataset_dict = dataset_dict
         self.model = model
@@ -84,6 +86,12 @@ class ExperimentData:
 
 
 class OWTData(ExperimentData):
+    """Class for the OpenWebText dataset
+    
+    When using this class, first instantiate and then call preprocess_datasets() to tokenize the dataset.
+
+    Next, call find_dataset_positions() to find the positions of the token to ablate in the dataset.
+    """
     def __init__(self, dataset_dict: DatasetDict, model, text_column: str = 'text', label_column: str = None):
         super().__init__(dataset_dict, model, text_column, label_column)
 
