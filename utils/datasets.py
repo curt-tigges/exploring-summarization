@@ -73,7 +73,7 @@ class ExperimentData:
         positions = torch.zeros_like(torch.tensor(example['tokens']), dtype=torch.int)
 
         # Find positions where tokens match the given token_id
-        positions[example['tokens'] == self.token_id] = 1
+        positions[example['tokens'] == self.token_to_ablate] = 1
         has_token = True if positions.sum() > 0 else False
 
         return {'positions': positions, 'has_token': has_token}
