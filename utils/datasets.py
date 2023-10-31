@@ -38,7 +38,7 @@ class ExperimentData:
     def find_dataset_positions(self, token_to_ablate: int = 13):
         """Finds the positions of a given token in the dataset"""
         for split in self.dataset_dict.keys():
-            self.dataset_dict[split] = self.dataset_dict[split].map(lambda example: self._find_dataset_positions(example, token_id=token_to_ablate))
+            self.dataset_dict[split] = self.dataset_dict[split].map(partial(self._find_dataset_positions, token_id=token_to_ablate))
 
         assert 'positions' in self.dataset_dict['train'].column_names, "Dataset does not have a 'positions' column"
 
@@ -65,7 +65,7 @@ class ExperimentData:
         return self.dataset_dict
 
 
-    def _find_dataset_positions(example, token_id=13):
+    def _find_dataset_positions(example, token_id: int):
         # Create a tensor of zeros with the same shape as example['tokens']
         positions = torch.zeros_like(torch.tensor(example['tokens']), dtype=torch.int)
 
