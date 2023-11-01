@@ -22,12 +22,10 @@ from transformer_lens.utils import (
 from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
 import pandas as pd
-from circuitsvis.activations import text_neuron_activations
-from utils.circuit_analysis import get_logit_diff
 
 
 class ExperimentDataLoader(DataLoader):
-    COLUMN_NAMES = ["tokens", "attention_mask", "positions", "has_token"]
+    COLUMN_NAMES = ["tokens", "attention_mask", "positions", "has_token", "label"]
 
     def __init__(
         self,
@@ -85,7 +83,6 @@ class ExperimentData(ABC):
         self,
         dataset_dict: DatasetDict,
         model: HookedTransformer,
-        text_column: str = "text",
     ):
         """
         dataset_dict:
@@ -96,19 +93,25 @@ class ExperimentData(ABC):
         """
         self.dataset_dict = dataset_dict
         self.model = model
-        self.text_column = text_column
         self.token_to_ablate = None
 
     @classmethod
     def from_string(
         cls,
-        dataset_name: str,
+        path: str,
         model: HookedTransformer,
-        text_column: str = "text",
+        name: str | None = None,
+        split: str | None = None,
     ):
-        dataset_dict = load_dataset(dataset_name)
+        dataset_dict = load_dataset(path, name, split=split)
+        if split is not None:
+            dataset_dict = DatasetDict(
+                {
+                    split: dataset_dict,
+                }
+            )
         assert isinstance(dataset_dict, DatasetDict), "Dataset is not a DatasetDict"
-        return cls(dataset_dict, model, text_column)
+        return cls(dataset_dict, model)
 
     def apply_function(self, function, **kwargs):
         """Applies an arbitrary function to the datasets"""
@@ -119,6 +122,7 @@ class ExperimentData(ABC):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
         self._tokenize()
         self.apply_function(self._create_attention_mask)
+        self.apply_function(self._create_labels)
 
         if token_to_ablate is not None:
             find_dataset_positions = partial(
@@ -169,26 +173,23 @@ class ExperimentData(ABC):
     def _create_attention_mask(example: Dict) -> Dict:
         pass
 
+    @staticmethod
+    @abstractmethod
+    def _create_labels(example: Dict) -> Dict:
+        pass
+
     @abstractmethod
     def _tokenize(self) -> None:
         pass
 
 
-class OWTData(ExperimentData):
-    """Class for the OpenWebText dataset
-
-    When using this class, first instantiate and then call preprocess_datasets() to tokenize the dataset.
-
-    Next, call find_dataset_positions() to find the positions of the token to ablate in the dataset.
-    """
-
+class HFData(ExperimentData):
     def __init__(
         self,
         dataset_dict: DatasetDict,
         model,
-        text_column: str = "text",
     ):
-        super().__init__(dataset_dict, model, text_column)
+        super().__init__(dataset_dict, model)
 
     def _tokenize(self):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
@@ -201,14 +202,60 @@ class OWTData(ExperimentData):
         attention_mask = torch.ones_like(example["tokens"])
         return {"attention_mask": attention_mask}
 
+
+class OWTData(HFData):
+    """Class for the OpenWebText dataset"""
+
     @classmethod
     def from_model(
         cls,
         model: HookedTransformer,
-        text_column: str = "text",
     ):
         return cls.from_string(
             "stas/openwebtext-10k",
             model,
-            text_column=text_column,
         )
+
+    @staticmethod
+    def _create_labels(_: Dict) -> Dict:
+        return {"label": "openwebtext"}
+
+
+class PileFullData(HFData):
+    """Class for the Pile dataset"""
+
+    @classmethod
+    def from_model(
+        cls,
+        model: HookedTransformer,
+    ):
+        return cls.from_string(
+            "monology/pile-uncopyrighted",
+            model,
+        )
+
+    @staticmethod
+    def _create_labels(example: Dict) -> Dict:
+        return {"label": example["meta"]["pile_set_name"]}
+
+
+class PileSplittedData(HFData):
+    """Class for the Pile dataset"""
+
+    @classmethod
+    def from_model(
+        cls,
+        model: HookedTransformer,
+        name: str,
+        split: Optional[str] = None,
+    ):
+        return cls.from_string(
+            "ArmelR/the-pile-splitted",
+            model,
+            name=name,
+            split=split,
+        )
+
+    @staticmethod
+    def _create_labels(example: Dict) -> Dict:
+        return {"label": example["domain"]}
