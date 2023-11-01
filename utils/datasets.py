@@ -12,7 +12,6 @@ from datasets import (
     load_dataset,
     DatasetDict,
     Dataset as HFDataset,
-    concatenate_datasets,
 )
 from jaxtyping import Float, Int, Bool
 from typing import Dict, Iterable, List, Optional, Tuple, Union
@@ -26,7 +25,7 @@ import pandas as pd
 
 
 class ExperimentDataLoader(DataLoader):
-    COLUMN_NAMES = ["tokens", "attention_mask", "positions", "has_token", "label"]
+    COLUMN_NAMES = ["tokens", "attention_mask", "positions", "has_token"]
 
     def __init__(
         self,
@@ -124,7 +123,6 @@ class ExperimentData(ABC):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
         self._tokenize()
         self.apply_function(self._create_attention_mask)
-        self.apply_function(self._create_labels)
 
         if token_to_ablate is not None:
             find_dataset_positions = partial(
@@ -175,11 +173,6 @@ class ExperimentData(ABC):
     def _create_attention_mask(example: Dict) -> Dict:
         pass
 
-    @staticmethod
-    @abstractmethod
-    def _create_labels(example: Dict) -> Dict:
-        pass
-
     @abstractmethod
     def _tokenize(self) -> None:
         pass
@@ -196,13 +189,9 @@ class HFData(ExperimentData):
     def _tokenize(self):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
         for split in self.dataset_dict.keys():
-            token_ds = tokenize_and_concatenate(
+            self.dataset_dict[split] = tokenize_and_concatenate(
                 self.dataset_dict[split], self.model.tokenizer  # type: ignore
             )
-            new_ds = concatenate_datasets(
-                [self.dataset_dict[split].remove_columns("text"), token_ds]
-            )
-            self.dataset_dict[split] = new_ds
 
     def _create_attention_mask(self, example: Dict):
         attention_mask = torch.ones_like(example["tokens"])
@@ -222,10 +211,6 @@ class OWTData(HFData):
             model,
         )
 
-    @staticmethod
-    def _create_labels(_: Dict) -> Dict:
-        return {"label": "openwebtext"}
-
 
 class PileFullData(HFData):
     """Class for the Pile dataset"""
@@ -239,10 +224,6 @@ class PileFullData(HFData):
             "monology/pile-uncopyrighted",
             model,
         )
-
-    @staticmethod
-    def _create_labels(example: Dict) -> Dict:
-        return {"label": example["meta"]["pile_set_name"]}
 
 
 class PileSplittedData(HFData):
@@ -261,7 +242,3 @@ class PileSplittedData(HFData):
             name=name,
             split=split,
         )
-
-    @staticmethod
-    def _create_labels(example: Dict) -> Dict:
-        return {"label": example["domain"]}
