@@ -4,7 +4,6 @@ import torch
 import numpy as np
 import datasets
 from torch import Tensor
-from torch.utils.data import DataLoader
 from datasets import (
     load_dataset,
     concatenate_datasets,
@@ -42,7 +41,7 @@ from utils.ablation import (
     freeze_attn_pattern_hook,
     convert_to_tensors,
 )
-
+from utils.datasets import ExperimentDataLoader
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -116,7 +115,7 @@ def get_zeroed_dir_vector(
 # -------------------- ACTIVATION UTILS --------------------
 def get_layerwise_token_mean_activations(
     model: HookedTransformer,
-    data_loader: DataLoader,
+    data_loader: ExperimentDataLoader,
     token_id: int,
     device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "layer d_model"]:
@@ -124,7 +123,7 @@ def get_layerwise_token_mean_activations(
 
     Args:
         model: HookedTransformer model
-        data_loader: DataLoader for the dataset
+        data_loader: ExperimentDataLoader for the dataset
         token_id: Token id to get the mean value of
 
     Returns:
@@ -183,7 +182,7 @@ def zero_attention_pos_hook(
 # -------------------- EXPERIMENTS --------------------
 def compute_ablation_modified_logit_diff(
     model: HookedTransformer,
-    data_loader: DataLoader,
+    data_loader: ExperimentDataLoader,
     layers_to_ablate: List[int],
     heads_to_freeze: List[Tuple[int, int]],
     cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
@@ -204,7 +203,7 @@ def compute_ablation_modified_logit_diff(
 
     Args:
         model: HookedTransformer model
-        data_loader: DataLoader for the dataset
+        data_loader: ExperimentDataLoader for the dataset
         layers_to_ablate: List of layers to ablate
         heads_to_freeze: List of heads to freeze
         cached_means:
@@ -390,7 +389,7 @@ def compute_ablation_modified_logit_diff(
 
 def compute_zeroed_attn_modified_loss(
     model: HookedTransformer,
-    data_loader: DataLoader,
+    data_loader: ExperimentDataLoader,
     heads_to_ablate: List[Tuple[int, int]],
     token_ids: List[int] = [13],
     device: torch.device = DEFAULT_DEVICE,
