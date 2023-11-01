@@ -141,12 +141,6 @@ class ExperimentData(ABC):
     def get_dataloaders(self, batch_size: int) -> Dict[str, ExperimentDataLoader]:
         """Returns a dictionary of dataloaders for each split"""
 
-        if "positions" not in self.dataset_dict["train"].column_names:
-            print(
-                "Warning: 'positions' column not found in dataset. Returning dataloaders without positions. \n"
-                "To add positions, run find_dataset_positions() first."
-            )
-
         dataloaders = {}
         for split in self.dataset_dict.keys():
             dataloaders[split] = ExperimentDataLoader(
