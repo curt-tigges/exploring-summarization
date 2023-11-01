@@ -99,16 +99,7 @@ def get_random_directions(
     device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "layer d_model"]:
     """Returns a list of random direction vectors of shape (n_layers, d_model)"""
-    directions = []
-    num_layers = model.cfg.n_layers
-    for _ in range(num_layers):
-        dir = torch.randn(model.cfg.d_model).to(device)
-        directions.append(dir)
-
-    # convert to tensor
-    directions = torch.stack(directions).to(device)
-
-    return directions
+    return torch.randn((model.cfg.n_layers, model.cfg.d_model)).to(device)
 
 
 def get_zeroed_dir_vector(
@@ -142,30 +133,29 @@ def get_layerwise_token_mean_activations(
     num_layers = model.cfg.n_layers
     d_model = model.cfg.d_model
 
-    activation_sums: Float[Tensor, "layer d_model"] = torch.stack(
-        [torch.zeros(d_model) for _ in range(num_layers)]
-    ).to(device=device, dtype=torch.float32)
-    token_counts = [0] * num_layers
+    activation_sums: Float[Tensor, "layer d_model"] = torch.zeros(
+        (num_layers, d_model), device=device, dtype=torch.float32
+    )
+    token_count: int = 0
 
-    token_mean_values = torch.zeros((num_layers, d_model))
     for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
 
-        # get positions of all specified token ids in batch
-        token_pos = find_positions(batch_tokens, token_ids=[token_id])
+        # Get binary mask of positions where token_id matches in the batch of tokens
+        token_mask = batch_tokens == token_id
+        token_count += token_mask.sum()
 
         _, cache = model.run_with_cache(batch_tokens, names_filter=resid_names_filter)
 
-        for i in range(batch_tokens.shape[0]):
-            for p in token_pos[i]:
-                for layer in range(num_layers):
-                    activation_sums[layer] += cache[f"blocks.{layer}.hook_resid_post"][
-                        i, p, :
-                    ]
-                    token_counts[layer] += 1
+        for layer in range(num_layers):
+            layer_activations = cache[f"blocks.{layer}.hook_resid_post"]
+            activation_sums[layer] += einops.einsum(
+                layer_activations,
+                token_mask.float(),
+                "batch seq d_model, batch seq -> d_model",
+            )
 
-    for layer in range(num_layers):
-        token_mean_values[layer] = activation_sums[layer] / token_counts[layer]
+    token_mean_values = activation_sums / token_count
 
     return token_mean_values
 

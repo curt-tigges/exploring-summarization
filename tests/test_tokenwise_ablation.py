@@ -80,10 +80,12 @@ class TestTokenwise(unittest.TestCase):
         torch.testing.assert_close(result, expected_result)
 
     def test_get_random_directions(self):
+        torch.manual_seed(0)
         result = get_random_directions(self.model)
         self.assertEqual(result.shape, (1, 512))
 
     def test_get_zeroed_dir_vector(self):
+        torch.manual_seed(0)
         result = get_zeroed_dir_vector(self.model)
         expected_result = torch.zeros((1, 512))
         torch.testing.assert_close(result, expected_result)
@@ -95,20 +97,20 @@ class TestTokenwise(unittest.TestCase):
             None,
             {
                 "blocks.0.hook_resid_post": torch.tensor(
-                    [[[1], [2], [3], [4]], [[5], [6], [7], [8]]]
+                    [[[1], [2], [3], [4]], [[5], [6], [7], [8]]],
+                    dtype=torch.float32,
                 ),
             },
         )
-        self.model.cfg.d_model = 1
+        model = HookedTransformer.from_pretrained("gelu-1l")
+        model.cfg.d_model = 1
 
         data_loader = MockDataLoader(
             [
                 {"tokens": torch.tensor([[1, 2, 3, 4], [5, 6, 2, 7]])},
             ]
         )
-        result = get_layerwise_token_mean_activations(
-            self.model, data_loader, token_id=2
-        )
+        result = get_layerwise_token_mean_activations(model, data_loader, token_id=2)
         expected_result = torch.tensor([[4.5]])
         torch.testing.assert_close(result, expected_result)
 

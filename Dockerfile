@@ -12,10 +12,6 @@ RUN pip install transformer-lens plotly einops protobuf==3.20.* jaxtyping==0.2.1
 RUN pip install typeguard==2.13.3
 RUN pip install circuitsvis
 
-# RUN git config --global user.email "oskar.hollinsworth@gmail.com" && \
-#     git config --global user.name "skar0" && \
-#     git config --global remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-
 # Node.js # https://github.com/nodesource/distributions
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
 RUN apt-get install -y ca-certificates curl gnupg
@@ -34,3 +30,4 @@ RUN apt install wget -y
 RUN wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-1/wkhtmltox_0.12.6-1.focal_amd64.deb
 RUN apt install -f ./wkhtmltox_0.12.6-1.focal_amd64.deb -y
 RUN pip install imgkit
+RUN pip install dill==0.3.4
