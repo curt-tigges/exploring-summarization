@@ -12,6 +12,7 @@ from datasets import (
     load_dataset,
     DatasetDict,
     Dataset as HFDataset,
+    concatenate_datasets,
 )
 from jaxtyping import Float, Int, Bool
 from typing import Dict, Iterable, List, Optional, Tuple, Union
@@ -102,8 +103,9 @@ class ExperimentData(ABC):
         model: HookedTransformer,
         name: str | None = None,
         split: str | None = None,
+        num_proc: int | None = None,
     ):
-        dataset_dict = load_dataset(path, name, split=split)
+        dataset_dict = load_dataset(path, name, split=split, num_proc=num_proc)
         if split is not None:
             dataset_dict = DatasetDict(
                 {
@@ -194,9 +196,13 @@ class HFData(ExperimentData):
     def _tokenize(self):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
         for split in self.dataset_dict.keys():
-            self.dataset_dict[split] = tokenize_and_concatenate(
+            token_ds = tokenize_and_concatenate(
                 self.dataset_dict[split], self.model.tokenizer  # type: ignore
             )
+            new_ds = concatenate_datasets(
+                [self.dataset_dict[split].remove_columns("text"), token_ds]
+            )
+            self.dataset_dict[split] = new_ds
 
     def _create_attention_mask(self, example: Dict):
         attention_mask = torch.ones_like(example["tokens"])
