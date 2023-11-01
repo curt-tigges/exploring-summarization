@@ -56,7 +56,7 @@ class ExperimentDataLoader(DataLoader):
             ), f"Dataset does not have a '{col_name}' column"
         dataset.set_format(
             type="torch",
-            columns=["tokens", "attention_mask", "positions", "has_token"],
+            columns=self.COLUMN_NAMES,
         )
         super().__init__(
             dataset,  # type: ignore
