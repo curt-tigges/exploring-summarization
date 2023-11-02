@@ -179,8 +179,28 @@ def zero_attention_pos_hook(
     return pattern
 
 
+def mask_loss_at_next_positions(
+    loss: Float[Tensor, "batch seq_len"],
+    positions: Float[Tensor, "batch seq_len"],
+    attention_mask: Float[Tensor, "batch seq_len"],
+) -> Float[Tensor, "batch seq_len"]:
+    """
+    We want to ignore loss changes immediately following the token of interest.
+    """
+    shifted_batch_pos = torch.roll(positions, shifts=1, dims=1)
+    shifted_batch_pos[:, 0] = 0  # Set the first column to zero because roll is circular
+
+    # Zero out loss_diff positions
+    # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
+    loss[shifted_batch_pos == 1] = 0
+
+    # set all masked positions to zero
+    loss[attention_mask == 0] = 0
+    return loss
+
+
 # -------------------- EXPERIMENTS --------------------
-def compute_ablation_modified_logit_diff(
+def compute_ablation_modified_metric(
     model: HookedTransformer,
     data_loader: ExperimentDataLoader,
     layers_to_ablate: List[int],
@@ -201,6 +221,9 @@ def compute_ablation_modified_logit_diff(
     Computes the change in metric (between two answers) when the activations of
     a particular token are mean-ablated.
 
+    If cached_means is specified, then we ablate the full residual stream at every layer.
+    if direction_vectors is specified, then we only mean-ablate those directions.
+
     Args:
         model: HookedTransformer model
         data_loader: ExperimentDataLoader for the dataset
@@ -209,6 +232,21 @@ def compute_ablation_modified_logit_diff(
         cached_means:
             List of tensors of shape (layer, d_model)
             containing the mean value of a given token for each layer
+        frozen_attn_variant:
+            If True, repeat the experiment with attention frozen
+        direction_vectors:
+            List of tensors of shape (layer, d_model)
+            containing the direction vector for each layer
+        multiplier:
+            Multiplier for the direction vector
+        all_positions:
+            If True, ablate all positions in the sequence.
+            Otherwise, only ablate the positions specified in the data loader.
+        metric:
+            Metric to compute. Either "logits" or "loss".
+            N.B.
+
+
 
     Returns:
         orig_metric_list:
@@ -297,17 +335,11 @@ def compute_ablation_modified_logit_diff(
                 [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
             )
             loss_diff = hooked_loss - orig_metric
-            shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
-            shifted_batch_pos[
-                :, 0
-            ] = 0  # Set the first column to zero because roll is circular
-
-            # Zero out loss_diff positions
-            # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
-            loss_diff[shifted_batch_pos == 1] = 0
-
-            # set all masked positions to zero
-            loss_diff[batch_value["attention_mask"] == 0] = 0
+            loss_diff = mask_loss_at_next_positions(
+                loss_diff,
+                positions=batch_pos,
+                attention_mask=batch_value["attention_mask"],
+            )
 
             ablated_metric_list.append(loss_diff)
 
@@ -361,17 +393,11 @@ def compute_ablation_modified_logit_diff(
                     dim=1,
                 )
                 loss_diff = hooked_loss - orig_metric
-                shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
-                shifted_batch_pos[
-                    :, 0
-                ] = 0  # Set the first column to zero because roll is circular
-
-                # Zero out loss_diff positions
-                # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
-                loss_diff[shifted_batch_pos == 1] = 0
-
-                # set all masked positions to zero
-                loss_diff[batch_value["attention_mask"] == 0] = 0
+                loss_diff = mask_loss_at_next_positions(
+                    loss_diff,
+                    positions=batch_pos,
+                    attention_mask=batch_value["attention_mask"],
+                )
 
                 freeze_ablated_metric_list.append(loss_diff)
 
