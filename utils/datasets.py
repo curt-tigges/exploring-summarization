@@ -74,6 +74,11 @@ class ExperimentDataLoader(DataLoader):
             persistent_workers=persistent_workers,
             pin_memory_device=pin_memory_device,
         )
+        self._name = dataset.builder_name
+
+    @property
+    def name(self):
+        return self._name
 
 
 class ExperimentData(ABC):
@@ -199,10 +204,12 @@ class OWTData(HFData):
     def from_model(
         cls,
         model: HookedTransformer,
+        split: Optional[str] = None,
     ):
         return cls.from_string(
             "stas/openwebtext-10k",
             model,
+            split=split,
         )
 
 
@@ -213,10 +220,12 @@ class PileFullData(HFData):
     def from_model(
         cls,
         model: HookedTransformer,
+        split: Optional[str] = None,
     ):
         return cls.from_string(
             "monology/pile-uncopyrighted",
             model,
+            split=split,
         )
 
 

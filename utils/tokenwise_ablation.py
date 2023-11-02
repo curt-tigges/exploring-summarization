@@ -1,3 +1,4 @@
+import os
 import einops
 from functools import partial
 import torch
@@ -25,15 +26,6 @@ from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
 import pandas as pd
 from circuitsvis.activations import text_neuron_activations
-from utils.store import (
-    load_array,
-    save_html,
-    save_array,
-    is_file,
-    get_model_name,
-    clean_label,
-    save_text,
-)
 from utils.cache import resid_names_filter
 from utils.circuit_analysis import get_logit_diff
 from utils.ablation import (
@@ -42,6 +34,7 @@ from utils.ablation import (
     convert_to_tensors,
 )
 from utils.datasets import ExperimentDataLoader
+from utils.store import create_file_name
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -118,6 +111,7 @@ def get_layerwise_token_mean_activations(
     data_loader: ExperimentDataLoader,
     token_id: int,
     device: torch.device = DEFAULT_DEVICE,
+    cached: bool = True,
 ) -> Float[Tensor, "layer d_model"]:
     """Get the mean value of a particular token id across a dataset for each layer of a model
 
@@ -129,6 +123,17 @@ def get_layerwise_token_mean_activations(
     Returns:
         token_mean_values: Tensor of shape (num_layers, d_model) containing the mean value of token_id for each layer
     """
+    file_name = create_file_name(
+        "mean_token_acts",
+        model_name=model.cfg.model_name,
+        dataset=data_loader.name,
+        token_id=token_id,
+        extension="pt",
+    )
+    file_path = os.path.join("results", "cache", file_name)
+    if cached and os.path.exists(file_path):
+        return torch.load(file_path)
+
     num_layers = model.cfg.n_layers
     d_model = model.cfg.d_model
 
@@ -156,6 +161,8 @@ def get_layerwise_token_mean_activations(
 
     token_mean_values = activation_sums / token_count
 
+    if cached:
+        torch.save(token_mean_values.cpu(), file_path)
     return token_mean_values
 
 
@@ -203,8 +210,8 @@ def mask_loss_at_next_positions(
 def compute_ablation_modified_metric(
     model: HookedTransformer,
     data_loader: ExperimentDataLoader,
-    layers_to_ablate: List[int],
-    heads_to_freeze: List[Tuple[int, int]],
+    layers_to_ablate: List[int] | Literal["all"] = "all",
+    heads_to_freeze: List[Tuple[int, int]] | Literal["all"] = "all",
     cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
     frozen_attn_variant: bool = False,
     direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
@@ -212,11 +219,8 @@ def compute_ablation_modified_metric(
     all_positions: bool = False,
     metric: Literal["logits", "loss"] = "logits",
     device: torch.device = DEFAULT_DEVICE,
-) -> Tuple[
-    Float[Tensor, "batch *pos"],
-    Float[Tensor, "batch *pos"],
-    Optional[Float[Tensor, "batch *pos"]],
-]:
+    cached: bool = True,
+) -> Float[Tensor, "experiment batch *pos"]:
     """
     Computes the change in metric (between two answers) when the activations of
     a particular token are mean-ablated.
@@ -249,17 +253,33 @@ def compute_ablation_modified_metric(
             Device to run the experiment on
 
     Returns:
-        orig_metric_list:
-            List of tensors of shape (batch, *pos)
-            containing the metric for each item in the batch before ablation
-        ablated_metric_list:
-            List of tensors of shape (batch, *pos)
-            containing the metric for each item in the batch after ablation
-        freeze_ablated_metric_list:
-            List of tensors of shape (batch, *pos)
-            containing the metric for each item in the batch after ablation with attention frozen
+
     """
     assert cached_means is not None or direction_vectors is not None
+    file_name = create_file_name(
+        "ablation_modified_metric",
+        model_name=model.cfg.model_name,
+        dataset=data_loader.name,
+        layers_to_ablate=layers_to_ablate,
+        heads_to_freeze=heads_to_freeze,
+        metric=metric,
+        direction_vectors=direction_vectors,
+        multiplier=multiplier,
+        all_positions=all_positions,
+        frozen_attn_variant=frozen_attn_variant,
+        extension="pt",
+    )
+    file_path = os.path.join("results", "cache", file_name)
+    if cached and os.path.exists(file_path):
+        return torch.load(file_path)
+    if layers_to_ablate == "all":
+        layers_to_ablate = list(range(model.cfg.n_layers))
+    if heads_to_freeze == "all":
+        heads_to_freeze = [
+            (layer, head)
+            for layer in range(model.cfg.n_layers)
+            for head in range(model.cfg.n_heads)
+        ]
 
     orig_metric_list = []
     ablated_metric_list = []
@@ -406,11 +426,14 @@ def compute_ablation_modified_metric(
     assert len(orig_metric_list) == len(ablated_metric_list)
     assert len(orig_metric_list) == len(data_loader)
 
-    return (
-        torch.cat(orig_metric_list),
-        torch.cat(ablated_metric_list),
-        torch.cat(freeze_ablated_metric_list) if frozen_attn_variant else None,
-    )
+    to_stack = [torch.cat(orig_metric_list), torch.cat(ablated_metric_list)]
+    if frozen_attn_variant:
+        assert len(orig_metric_list) == len(freeze_ablated_metric_list)
+        to_stack.append(torch.cat(freeze_ablated_metric_list))
+    output = torch.stack(to_stack, dim=0)
+    if cached:
+        torch.save(output.cpu(), file_path)
+    return output
 
 
 def compute_zeroed_attn_modified_loss(

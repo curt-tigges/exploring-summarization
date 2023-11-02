@@ -11,7 +11,6 @@ Please delete options that are not relevant.
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] This change requires a documentation update
 
 ### Screenshots
 Please attach before and after screenshots of the change if applicable.
@@ -38,6 +37,7 @@ To upload images to a PR -- simply drag and drop an image while in edit mode and
 - [ ] I have minimised type warnings from [Pylance](https://marketplace.visualstudio.com/items?itemName=ms-python.vscode-pylance)
 - [ ] I have culled any redundant and unused code
 - [ ] I have cached results of slow operations in as flexible of a format as possible
+- [ ] Cache results are stored in a flat structure inside results/cache and the file name contains all necessary identifying information (such as model name and dataset used) to avoid accidental overwriting.
 - [ ] I have used intuitive abstractions, making clear the public entrypoints to a given class
 
 
