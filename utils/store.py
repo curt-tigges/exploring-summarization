@@ -78,7 +78,7 @@ def nested_list_to_string(nested_list):
     # Flatten the nested list using recursion
     def flatten(lst):
         for elem in lst:
-            if isinstance(elem, list):
+            if isinstance(elem, list) or isinstance(elem, tuple):
                 yield from flatten(elem)
             else:
                 yield elem

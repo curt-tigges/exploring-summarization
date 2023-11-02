@@ -3,9 +3,10 @@ from unittest.mock import patch, Mock
 import torch
 import numpy as np
 from typing import List
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import get_act_name
+from utils.datasets import ExperimentDataLoader
 from utils.tokenwise_ablation import (
     find_positions,
     load_directions,
@@ -30,7 +31,7 @@ class MockBatch:
         self.tokens = tokens
 
 
-class MockDataLoader(DataLoader):
+class MockDataLoader(ExperimentDataLoader):
     def __init__(self, data):
         self.data = data
 
@@ -40,6 +41,10 @@ class MockDataLoader(DataLoader):
     def __len__(self):
         return len(self.data)
 
+    @property
+    def name(self):
+        return "MockDataLoader"
+
 
 class DummyDataset(Dataset):
     def __init__(self, seed: int = 0):
@@ -48,6 +53,16 @@ class DummyDataset(Dataset):
         self.attention_mask = torch.ones((4, 3), dtype=torch.long)
         self.positions = torch.ones((4, 3), dtype=torch.long)
         self.answers = torch.randint(0, 15, (4, 2))
+        self.has_token = torch.ones((4,), dtype=torch.long)
+        self.column_names = [
+            "tokens",
+            "attention_mask",
+            "positions",
+            "answers",
+            "has_token",
+        ]
+        self.builder_name = "dummy"
+        self.split = "dummy"
 
     def __len__(self):
         return len(self.tokens)
@@ -57,8 +72,12 @@ class DummyDataset(Dataset):
             "tokens": self.tokens[idx],
             "attention_mask": self.attention_mask[idx],
             "positions": self.positions[idx],
+            "has_token": self.has_token[idx],
             "answers": self.answers[idx],
         }
+
+    def set_format(self, type, columns):
+        pass
 
 
 class TestTokenwise(unittest.TestCase):
@@ -124,7 +143,7 @@ class TestTokenwise(unittest.TestCase):
 
     def test_compute_ablation_modified_logit_diff(self):
         dataset = DummyDataset()
-        data_loader = DataLoader(dataset, batch_size=2)
+        data_loader = ExperimentDataLoader(dataset, batch_size=2)
         layers_to_ablate = [
             0,
         ]
@@ -133,11 +152,7 @@ class TestTokenwise(unittest.TestCase):
         ]
         cached_means = torch.zeros((1, 512))
 
-        (
-            orig_metric,
-            ablated_metric,
-            freeze_ablated_metric,
-        ) = compute_ablation_modified_metric(
+        metrics = compute_ablation_modified_metric(
             self.model,
             data_loader,
             layers_to_ablate=layers_to_ablate,
@@ -145,13 +160,11 @@ class TestTokenwise(unittest.TestCase):
             cached_means=cached_means,
         )
 
-        assert orig_metric.shape == ablated_metric.shape
-        assert freeze_ablated_metric is None
-        assert len(orig_metric) == len(data_loader)
+        self.assertEqual(metrics.shape[1], len(data_loader))
 
     def test_compute_zeroed_attn_modified_loss(self):
         dataset = DummyDataset()
-        data_loader = DataLoader(dataset, batch_size=1)
+        data_loader = ExperimentDataLoader(dataset, batch_size=1)
         heads_to_ablate = [
             (0, 0),
         ]
