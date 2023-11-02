@@ -113,6 +113,10 @@ def args_to_file_name(**kwargs):
             value = value.lower()
             value = value.replace(" ", "_")
             value = value.replace("/", "_")
+        elif isinstance(value, int):
+            value = str(value)
+        elif isinstance(value, float):
+            value = "{:.2f}".format(value).replace(".", "_")
         else:
             raise ValueError(f"Unimplemented type: {type(value)}")
 
