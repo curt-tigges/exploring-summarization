@@ -30,11 +30,16 @@ To upload images to a PR -- simply drag and drop an image while in edit mode and
 # Checklist:
 
 - [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
 - [ ] My changes generate no new warnings
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] I have not rewritten tests relating to key interfaces which would affect backward compatibility
+- [ ] My code follows the [Black](https://pypi.org/project/black/) format
+- [ ] I have minimised type warnings from [Pylance](https://marketplace.visualstudio.com/items?itemName=ms-python.vscode-pylance)
+- [ ] I have culled any redundant and unused code
+- [ ] I have cached results of slow operations in as flexible of a format as possible
+- [ ] I have used intuitive abstractions, making clear the public entrypoints to a given class
+
 
 <!--
 As you go through the checklist above, you can mark something as done by putting an x character in it
