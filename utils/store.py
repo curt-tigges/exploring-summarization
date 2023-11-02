@@ -91,8 +91,8 @@ def assert_alphanumeric_underscore(string):
     # Check if all characters in the string are either alphanumeric or underscores
     assert all(
         c.isalnum() or c == "_" for c in string
-    ), "String contains non-alphanumeric characters or characters other than underscores."
-    assert string == string.lower(), "String contains uppercase characters."
+    ), f"String contains non-alphanumeric and non-underscore characters: {string}"
+    assert string == string.lower(), f"String contains uppercase characters: {string}"
 
 
 def args_to_file_name(**kwargs):
