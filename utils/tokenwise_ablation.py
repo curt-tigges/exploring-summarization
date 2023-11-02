@@ -244,9 +244,9 @@ def compute_ablation_modified_metric(
             Otherwise, only ablate the positions specified in the data loader.
         metric:
             Metric to compute. Either "logits" or "loss".
-            N.B.
-
-
+            N.B. we only mask subsequent positions for loss.
+        device:
+            Device to run the experiment on
 
     Returns:
         orig_metric_list:
