@@ -74,7 +74,10 @@ class ExperimentDataLoader(DataLoader):
             persistent_workers=persistent_workers,
             pin_memory_device=pin_memory_device,
         )
-        self._name = dataset.builder_name
+        if dataset.builder_name is not None:
+            self._name = dataset.builder_name
+        else:
+            self._name = dataset.info.homepage.split("/")[-2]
 
     @property
     def name(self):
