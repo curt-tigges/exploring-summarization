@@ -78,6 +78,7 @@ class ExperimentDataLoader(DataLoader):
             self._name = dataset.builder_name
         else:
             self._name = dataset.info.homepage.split("/")[-2]
+        self._name += f"_{dataset.split}"
 
     @property
     def name(self):
@@ -137,6 +138,10 @@ class ExperimentData(ABC):
                 self._find_dataset_positions, token_to_ablate=token_to_ablate
             )
             self.apply_function(find_dataset_positions, batched=False)
+
+        for split in self.dataset_dict.keys():
+            if self.dataset_dict[split].split is None:
+                self.dataset_dict[split]._split = split
 
         example_ds = list(self.dataset_dict.values())[0]
         assert (

@@ -87,6 +87,14 @@ def nested_list_to_string(nested_list):
     return "_".join(map(str, flatten(nested_list)))
 
 
+def assert_alphanumeric_underscore(string):
+    # Check if all characters in the string are either alphanumeric or underscores
+    assert all(
+        c.isalnum() or c == "_" for c in string
+    ), "String contains non-alphanumeric characters or characters other than underscores."
+    assert string == string.lower(), "String contains uppercase characters."
+
+
 def args_to_file_name(**kwargs):
     """Converts a dictionary of arguments to a file name"""
     file_name = ""
@@ -109,6 +117,7 @@ def args_to_file_name(**kwargs):
             raise ValueError(f"Unimplemented type: {type(value)}")
 
         file_name += f"{key}__{value}__"
+    assert_alphanumeric_underscore(file_name)
     return file_name[:-2]
 
 
