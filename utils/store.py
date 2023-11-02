@@ -95,6 +95,11 @@ def assert_alphanumeric_underscore(string):
     assert string == string.lower(), f"String contains uppercase characters: {string}"
 
 
+def clean_string(string: str):
+    # Remove all non-alphanumeric characters from the string
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", string.lower())
+
+
 def args_to_file_name(**kwargs):
     """Converts a dictionary of arguments to a file name"""
     file_name = ""
@@ -110,9 +115,7 @@ def args_to_file_name(**kwargs):
         elif value is None:
             value = "none"
         elif isinstance(value, str):
-            value = value.lower()
-            value = value.replace(" ", "_")
-            value = value.replace("/", "_")
+            value = clean_string(value)
         elif isinstance(value, int):
             value = str(value)
         elif isinstance(value, float):
