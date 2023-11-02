@@ -133,3 +133,25 @@ def create_file_name(name: str, extension: str, **kwargs):
     extension = extension.replace(".", "")
     file_name = args_to_file_name(**kwargs)
     return f"{name}_{file_name}.{extension}"
+
+
+class ResultsFile:
+    def __init__(
+        self,
+        name: str,
+        extension: str,
+        root: str = "results",
+        result_type="cache",
+        **kwargs,
+    ):
+        if not os.path.exists(root):
+            os.mkdir(root)
+        if not os.path.exists(f"{root}/{result_type}"):
+            os.mkdir(f"{root}/{result_type}")
+        self.name = name
+        self.extension = extension
+        self.file_name = create_file_name(name, extension, **kwargs)
+        self.path = f"{root}/{result_type}/{self.file_name}"
+
+    def exists(self):
+        return os.path.exists(self.path)

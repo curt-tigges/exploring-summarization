@@ -34,7 +34,7 @@ from utils.ablation import (
     convert_to_tensors,
 )
 from utils.datasets import ExperimentDataLoader
-from utils.store import create_file_name
+from utils.store import create_file_name, ResultsFile
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -123,18 +123,15 @@ def get_layerwise_token_mean_activations(
     Returns:
         token_mean_values: Tensor of shape (num_layers, d_model) containing the mean value of token_id for each layer
     """
-    file_name = create_file_name(
+    file = ResultsFile(
         "mean_token_acts",
         model_name=model.cfg.model_name,
         dataset=data_loader.name,
         token_id=token_id,
         extension="pt",
     )
-    file_path = os.path.join("results", "cache", file_name)
-    if cached and os.path.exists(file_path):
+    if cached and file.exists():
         return torch.load(file_path)
-    if cached:
-        assert os.path.exists("results/cache")
 
     num_layers = model.cfg.n_layers
     d_model = model.cfg.d_model
@@ -164,7 +161,7 @@ def get_layerwise_token_mean_activations(
     token_mean_values = activation_sums / token_count
 
     if cached:
-        torch.save(token_mean_values.cpu(), file_path)
+        torch.save(token_mean_values.cpu(), file.path)
     return token_mean_values
 
 
@@ -258,7 +255,7 @@ def compute_ablation_modified_metric(
 
     """
     assert cached_means is not None or direction_vectors is not None
-    file_name = create_file_name(
+    file = ResultsFile(
         "ablation_modified_metric",
         model_name=model.cfg.model_name,
         dataset=data_loader.name,
@@ -271,8 +268,7 @@ def compute_ablation_modified_metric(
         frozen_attn_variant=frozen_attn_variant,
         extension="pt",
     )
-    file_path = os.path.join("results", "cache", file_name)
-    if cached and os.path.exists(file_path):
+    if cached and file.exists():
         return torch.load(file_path)
     if layers_to_ablate == "all":
         layers_to_ablate = list(range(model.cfg.n_layers))
@@ -434,7 +430,7 @@ def compute_ablation_modified_metric(
         to_stack.append(torch.cat(freeze_ablated_metric_list))
     output = torch.stack(to_stack, dim=0)
     if cached:
-        torch.save(output.cpu(), file_path)
+        torch.save(output.cpu(), file.path)
     return output
 
 
