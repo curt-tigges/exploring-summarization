@@ -104,7 +104,9 @@ def args_to_file_name(**kwargs):
     """Converts a dictionary of arguments to a file name"""
     file_name = ""
     for key, value in kwargs.items():
-        if isinstance(value, list) or isinstance(value, tuple):
+        if value is None or len(value) == 0:
+            continue
+        elif isinstance(value, list) or isinstance(value, tuple):
             value = len(value)
         elif isinstance(value, bool):
             value = str(value).lower()
@@ -112,8 +114,6 @@ def args_to_file_name(**kwargs):
             value = value.cfg.model_name
         elif isinstance(value, torch.Tensor):
             value = "_".join([str(d) for d in value.shape])
-        elif value is None:
-            value = "none"
         elif isinstance(value, str):
             value = clean_string(value)
         elif isinstance(value, int):
