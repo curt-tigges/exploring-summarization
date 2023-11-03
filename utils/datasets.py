@@ -4,11 +4,12 @@ from functools import partial
 import torch
 import datasets
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset as TorchDataset
+from torch.utils.data import (
+    DataLoader,
+    Sampler,
+)
 from datasets import (
     load_dataset,
-    concatenate_datasets,
-    load_from_disk,
     DatasetDict,
     Dataset as HFDataset,
 )
@@ -17,23 +18,71 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import (
     tokenize_and_concatenate,
-    get_act_name,
-    test_prompt,
 )
 from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
 import pandas as pd
-from circuitsvis.activations import text_neuron_activations
-from utils.store import (
-    load_array,
-    save_html,
-    save_array,
-    is_file,
-    get_model_name,
-    clean_label,
-    save_text,
-)
-from utils.circuit_analysis import get_logit_diff
+
+
+class ExperimentDataLoader(DataLoader):
+    COLUMN_NAMES = ["tokens", "attention_mask", "positions", "has_token"]
+
+    def __init__(
+        self,
+        dataset: HFDataset,
+        batch_size: int | None = 1,
+        shuffle: bool | None = None,
+        sampler: Sampler | Iterable | None = None,
+        batch_sampler: Sampler[List] | Iterable[List] | None = None,
+        num_workers: int = 0,
+        collate_fn=None,
+        pin_memory: bool = False,
+        drop_last: bool = False,
+        timeout: float = 0,
+        worker_init_fn=None,
+        multiprocessing_context=None,
+        generator=None,
+        *,
+        prefetch_factor: int | None = None,
+        persistent_workers: bool = False,
+        pin_memory_device: str = "",
+    ):
+        # Assert that dataset has the required columns
+        for col_name in self.COLUMN_NAMES:
+            assert (
+                col_name in dataset.column_names
+            ), f"Dataset does not have a '{col_name}' column"
+        dataset.set_format(
+            type="torch",
+            columns=self.COLUMN_NAMES,
+        )
+        super().__init__(
+            dataset,  # type: ignore
+            batch_size,
+            shuffle,
+            sampler,
+            batch_sampler,
+            num_workers,
+            collate_fn,
+            pin_memory,
+            drop_last,
+            timeout,
+            worker_init_fn,
+            multiprocessing_context,
+            generator,
+            prefetch_factor=prefetch_factor,
+            persistent_workers=persistent_workers,
+            pin_memory_device=pin_memory_device,
+        )
+        if dataset.builder_name is not None:
+            self._name = dataset.builder_name
+        else:
+            self._name = dataset.info.homepage.split("/")[-2]
+        self._name += f"_{dataset.split}"
+
+    @property
+    def name(self):
+        return self._name
 
 
 class ExperimentData(ABC):
@@ -43,8 +92,6 @@ class ExperimentData(ABC):
         self,
         dataset_dict: DatasetDict,
         model: HookedTransformer,
-        text_column: str = "text",
-        label_column: Optional[str] = None,
     ):
         """
         dataset_dict:
@@ -55,21 +102,26 @@ class ExperimentData(ABC):
         """
         self.dataset_dict = dataset_dict
         self.model = model
-        self.text_column = text_column
-        self.label_column = label_column
         self.token_to_ablate = None
 
     @classmethod
     def from_string(
         cls,
-        dataset_name: str,
+        path: str,
         model: HookedTransformer,
-        text_column: str = "text",
-        label_column: Optional[str] = None,
+        name: str | None = None,
+        split: str | None = None,
+        num_proc: int | None = None,
     ):
-        dataset_dict = load_dataset(dataset_name)
+        dataset_dict = load_dataset(path, name, split=split, num_proc=num_proc)
+        if split is not None:
+            dataset_dict = DatasetDict(
+                {
+                    split: dataset_dict,
+                }
+            )
         assert isinstance(dataset_dict, DatasetDict), "Dataset is not a DatasetDict"
-        return cls(dataset_dict, model, text_column, label_column)
+        return cls(dataset_dict, model)
 
     def apply_function(self, function, **kwargs):
         """Applies an arbitrary function to the datasets"""
@@ -87,6 +139,10 @@ class ExperimentData(ABC):
             )
             self.apply_function(find_dataset_positions, batched=False)
 
+        for split in self.dataset_dict.keys():
+            if self.dataset_dict[split].split is None:
+                self.dataset_dict[split]._split = split
+
         example_ds = list(self.dataset_dict.values())[0]
         assert (
             "tokens" in example_ds.column_names
@@ -95,18 +151,12 @@ class ExperimentData(ABC):
             "positions" in example_ds.column_names
         ), "Dataset does not have a 'positions' column in the train split"
 
-    def get_dataloaders(self, batch_size: int) -> Dict[str, DataLoader]:
+    def get_dataloaders(self, batch_size: int) -> Dict[str, ExperimentDataLoader]:
         """Returns a dictionary of dataloaders for each split"""
-
-        if "positions" not in self.dataset_dict["train"].column_names:
-            print(
-                "Warning: 'positions' column not found in dataset. Returning dataloaders without positions. \n"
-                "To add positions, run find_dataset_positions() first."
-            )
 
         dataloaders = {}
         for split in self.dataset_dict.keys():
-            dataloaders[split] = DataLoader(
+            dataloaders[split] = ExperimentDataLoader(
                 self.dataset_dict[split], batch_size=batch_size, shuffle=True
             )
         return dataloaders
@@ -135,44 +185,71 @@ class ExperimentData(ABC):
         pass
 
 
-class OWTData(ExperimentData):
-    """Class for the OpenWebText dataset
-
-    When using this class, first instantiate and then call preprocess_datasets() to tokenize the dataset.
-
-    Next, call find_dataset_positions() to find the positions of the token to ablate in the dataset.
-    """
-
+class HFData(ExperimentData):
     def __init__(
         self,
         dataset_dict: DatasetDict,
         model,
-        text_column: str = "text",
-        label_column: Optional[str] = None,
     ):
-        super().__init__(dataset_dict, model, text_column, label_column)
+        super().__init__(dataset_dict, model)
 
     def _tokenize(self):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = tokenize_and_concatenate(
-                self.dataset_dict[split], self.model.tokenizer
+                self.dataset_dict[split], self.model.tokenizer  # type: ignore
             )
 
     def _create_attention_mask(self, example: Dict):
         attention_mask = torch.ones_like(example["tokens"])
         return {"attention_mask": attention_mask}
 
+
+class OWTData(HFData):
+    """Class for the OpenWebText dataset"""
+
     @classmethod
     def from_model(
         cls,
         model: HookedTransformer,
-        text_column: str = "text",
-        label_column: Optional[str] = None,
+        split: Optional[str] = None,
     ):
         return cls.from_string(
             "stas/openwebtext-10k",
             model,
-            text_column=text_column,
-            label_column=label_column,
+            split=split,
+        )
+
+
+class PileFullData(HFData):
+    """Class for the Pile dataset"""
+
+    @classmethod
+    def from_model(
+        cls,
+        model: HookedTransformer,
+        split: Optional[str] = None,
+    ):
+        return cls.from_string(
+            "monology/pile-uncopyrighted",
+            model,
+            split=split,
+        )
+
+
+class PileSplittedData(HFData):
+    """Class for the Pile dataset"""
+
+    @classmethod
+    def from_model(
+        cls,
+        model: HookedTransformer,
+        name: str,
+        split: Optional[str] = None,
+    ):
+        return cls.from_string(
+            "ArmelR/the-pile-splitted",
+            model,
+            name=name,
+            split=split,
         )

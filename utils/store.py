@@ -13,12 +13,12 @@ import pickle
 from datasets import dataset_dict
 
 
-def add_styling(html):
+def add_styling(html: str):
     # Extract the table ID from the HTML using regex
     table_id_match = re.search(r'<table id="([^"]+)">', html)
     if not table_id_match:
         return "Invalid HTML: Table ID not found"
-    
+
     table_id = table_id_match.group(1)
 
     # Define the general styles using the extracted table ID
@@ -62,226 +62,96 @@ def add_styling(html):
         background-color: #ddd;
     }}
     """
-    
+
     # Insert the general styles into the existing style section of the HTML
-    style_start_index = html.find("<style type=\"text/css\">")
+    style_start_index = html.find('<style type="text/css">')
     if style_start_index == -1:
         return "Invalid HTML: Style section not found"
-    
-    style_start_index += len("<style type=\"text/css\">")
+
+    style_start_index += len('<style type="text/css">')
     html_with_styles = html[:style_start_index] + styles + html[style_start_index:]
-    
+
     return html_with_styles
 
 
-def clean_label(label: str) -> str:
-    label = label.replace('.npy', '')
-    label = label.replace('.html', '')
-    label = label.replace('data/', '')
-    assert "/" not in label, "Label must not contain slashes"
-    return label
+def nested_list_to_string(nested_list):
+    # Flatten the nested list using recursion
+    def flatten(lst):
+        for elem in lst:
+            if isinstance(elem, list) or isinstance(elem, tuple):
+                yield from flatten(elem)
+            else:
+                yield elem
+
+    # Flatten the nested list and join using underscores
+    return "_".join(map(str, flatten(nested_list)))
 
 
-def get_model_name(model: Union[HookedTransformer, str]) -> str:
-    if isinstance(model, HookedTransformer):
-        assert len(model.cfg.model_name) > 0, "Model must have a name"
-        model = model.cfg.model_name
-    model = model.replace('EleutherAI/', '')
-    if model == 'gpt2':
-        model = 'gpt2-small'
-    return model
+def assert_alphanumeric_underscore(string):
+    # Check if all characters in the string are either alphanumeric or underscores
+    assert all(
+        c.isalnum() or c == "_" for c in string
+    ), f"String contains non-alphanumeric and non-underscore characters: {string}"
+    assert string == string.lower(), f"String contains uppercase characters: {string}"
 
 
-def get_csv_path(
-    label: str,
-    model: Union[HookedTransformer, str],
-):
-    model: str = get_model_name(model)
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    if not os.path.exists(model_path):
-        os.mkdir(model_path)
-    path = os.path.join(model_path, label + '.csv')
-    return path
+def clean_string(string: str):
+    # Remove all non-alphanumeric characters from the string
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", string.lower())
 
 
-def update_csv(
-    data: pd.DataFrame,
-    label: str, 
-    model: Union[HookedTransformer, str], 
-    key_cols: Iterable[str] = None,
-):
-    path = get_csv_path(label, model)
-    curr = pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
-    curr = pd.concat([curr, data], axis=0)
-    if key_cols is not None:
-        curr = curr.drop_duplicates(subset=key_cols)
-    curr.to_csv(path, index=False)
-    return path
+def args_to_file_name(**kwargs):
+    """Converts a dictionary of arguments to a file name"""
+    file_name = ""
+    for key, value in kwargs.items():
+        if isinstance(value, list) or isinstance(value, tuple):
+            value = nested_list_to_string(value)
+        elif isinstance(value, bool):
+            value = str(value).lower()
+        elif isinstance(value, HookedTransformer):
+            value = value.cfg.model_name
+        elif isinstance(value, torch.Tensor):
+            value = "_".join([str(d) for d in value.shape])
+        elif value is None:
+            value = "none"
+        elif isinstance(value, str):
+            value = clean_string(value)
+        elif isinstance(value, int):
+            value = str(value)
+        elif isinstance(value, float):
+            value = "{:.2f}".format(value).replace(".", "_")
+        else:
+            raise ValueError(f"Unimplemented type: {type(value)}")
+
+        file_name += f"{key}__{value}__"
+    assert_alphanumeric_underscore(file_name)
+    return file_name[:-2]
 
 
-def get_csv(
-    label: str,
-    model: Union[HookedTransformer, str],
-    key_cols: Iterable[str] = None,
-) -> pd.DataFrame:
-    path = get_csv_path(label, model)
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    df = pd.read_csv(path)
-    if key_cols is not None:
-        df = df.drop_duplicates(subset=key_cols)
-    return df
+def create_file_name(name: str, extension: str, **kwargs):
+    """Creates a file name from a name and a dictionary of arguments"""
+    extension = extension.replace(".", "")
+    file_name = args_to_file_name(**kwargs)
+    return f"{name}_{file_name}.{extension}"
 
 
-def to_csv(
-    data: Union[pd.DataFrame, pd.Series],
-    label: str,
-    model: Union[HookedTransformer, str],
-):
-    path = get_csv_path(label, model)
-    data.to_csv(path, index=False)
-    return path
+class ResultsFile:
+    def __init__(
+        self,
+        name: str,
+        extension: str,
+        root: str = "results",
+        result_type="cache",
+        **kwargs,
+    ):
+        if not os.path.exists(root):
+            os.mkdir(root)
+        if not os.path.exists(f"{root}/{result_type}"):
+            os.mkdir(f"{root}/{result_type}")
+        self.name = name
+        self.extension = extension
+        self.file_name = create_file_name(name, extension, **kwargs)
+        self.path = f"{root}/{result_type}/{self.file_name}"
 
-
-def eval_csv(
-    query: str,
-    label: str,
-    model: Union[HookedTransformer, str],
-    key_cols: Iterable[str] = None,
-):
-    df = get_csv(label, model)
-    if df.empty:
-        return False
-    if key_cols is not None:
-        df = df.drop_duplicates(subset=key_cols)
-    return df.eval(query).any()
-
-
-def save_array(
-    array: Union[np.ndarray, torch.Tensor], 
-    label: str, 
-    model: Union[HookedTransformer, str],
-    root: str = 'data',
-):
-    if not os.path.exists(root):
-        os.mkdir(root)
-    model: str = get_model_name(model)
-    if isinstance(array, torch.Tensor):
-        array = array.cpu().detach().numpy()
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    if not os.path.exists(model_path):
-        os.mkdir(model_path)
-    path = os.path.join(model_path, label + '.npy')
-    with open(path, 'wb') as f:
-        np.save(f, array)
-    return path
-
-
-def load_array(label: str, model: Union[HookedTransformer, str]) -> np.ndarray:
-    model: str = get_model_name(model)
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    path = os.path.join(model_path, label + '.npy')
-    with open(path, 'rb') as f:
-        array = np.load(f)
-    return array
-
-
-def save_html(
-    html_data: Union[go.Figure, RenderedHTML, Styler],
-    label: str, 
-    model: Union[HookedTransformer, str]
-):
-    model: str = get_model_name(model)
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    if not os.path.exists(model_path):
-        os.mkdir(model_path)
-    path = os.path.join(model_path, label + '.html')
-    if isinstance(html_data, go.Figure):
-        html_data.write_html(path)
-    elif isinstance(html_data, RenderedHTML):
-        with open(path, 'w') as f:
-            f.write(str(html_data))
-    elif isinstance(html_data, Styler):
-        html = html_data.to_html()
-        html = add_styling(html)
-        with open(path, 'w') as f:
-            f.write(html)
-    return path
-
-
-def get_labels(glob_str: str, model: Union[HookedTransformer, str]) -> list:
-    model: str = get_model_name(model)
-    model_path = os.path.join('data', model)
-    labels = [os.path.split(p)[-1] for p in glob.iglob(os.path.join(model_path, glob_str))]
-    return labels
-
-
-def is_file(name: str, model: Union[HookedTransformer, str]) -> list:
-    model: str = get_model_name(model)
-    model_path = os.path.join('data', model)
-    file_path = os.path.join(model_path, name)
-    return os.path.exists(file_path)
-
-
-def save_text(
-    text: str, 
-    label: str, 
-    model: Union[HookedTransformer, str]
-):
-    model: str = get_model_name(model)
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    if not os.path.exists(model_path):
-        os.mkdir(model_path)
-    path = os.path.join(model_path, label + '.txt')
-    with open(path, 'w') as f:
-        f.write(text)
-    return path
-
-
-def save_pickle(
-    obj: object,
-    label: str,
-    model: Union[HookedTransformer, str],
-):
-    model: str = get_model_name(model)
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    if not os.path.exists(model_path):
-        os.mkdir(model_path)
-    path = os.path.join(model_path, label + '.pkl')
-    with open(path, 'wb') as f:
-        pickle.dump(obj, f)
-    return path
-
-
-def load_pickle(
-    label: str,
-    model: Union[HookedTransformer, str],
-):
-    model: str = get_model_name(model)
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    path = os.path.join(model_path, label + '.pkl')
-    with open(path, 'rb') as f:
-        obj = pickle.load(f)
-    return obj
-
-
-def save_dataset_dict(
-    dataset_dict: dataset_dict,
-    label: str,
-    model: Union[HookedTransformer, str],
-):
-    model: str = get_model_name(model)
-    label = clean_label(label)
-    model_path = os.path.join('data', model)
-    if not os.path.exists(model_path):
-        os.mkdir(model_path)
-    path = os.path.join(model_path, label + '.pkl')
-    dataset_dict.save_to_disk(path)
-    return path
+    def exists(self):
+        return os.path.exists(self.path)

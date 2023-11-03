@@ -3,9 +3,10 @@ from unittest.mock import patch, Mock
 import torch
 import numpy as np
 from typing import List
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import get_act_name
+from utils.datasets import ExperimentDataLoader
 from utils.tokenwise_ablation import (
     find_positions,
     load_directions,
@@ -13,8 +14,9 @@ from utils.tokenwise_ablation import (
     get_zeroed_dir_vector,
     get_layerwise_token_mean_activations,
     zero_attention_pos_hook,
-    compute_ablation_modified_logit_diff,
+    compute_ablation_modified_metric,
     compute_zeroed_attn_modified_loss,
+    mask_loss_at_next_positions,
 )
 
 
@@ -29,7 +31,7 @@ class MockBatch:
         self.tokens = tokens
 
 
-class MockDataLoader(DataLoader):
+class MockDataLoader(ExperimentDataLoader):
     def __init__(self, data):
         self.data = data
 
@@ -39,6 +41,10 @@ class MockDataLoader(DataLoader):
     def __len__(self):
         return len(self.data)
 
+    @property
+    def name(self):
+        return "MockDataLoader"
+
 
 class DummyDataset(Dataset):
     def __init__(self, seed: int = 0):
@@ -47,6 +53,16 @@ class DummyDataset(Dataset):
         self.attention_mask = torch.ones((4, 3), dtype=torch.long)
         self.positions = torch.ones((4, 3), dtype=torch.long)
         self.answers = torch.randint(0, 15, (4, 2))
+        self.has_token = torch.ones((4,), dtype=torch.long)
+        self.column_names = [
+            "tokens",
+            "attention_mask",
+            "positions",
+            "answers",
+            "has_token",
+        ]
+        self.builder_name = "dummy"
+        self.split = "dummy"
 
     def __len__(self):
         return len(self.tokens)
@@ -56,8 +72,12 @@ class DummyDataset(Dataset):
             "tokens": self.tokens[idx],
             "attention_mask": self.attention_mask[idx],
             "positions": self.positions[idx],
+            "has_token": self.has_token[idx],
             "answers": self.answers[idx],
         }
+
+    def set_format(self, type, columns):
+        pass
 
 
 class TestTokenwise(unittest.TestCase):
@@ -123,7 +143,7 @@ class TestTokenwise(unittest.TestCase):
 
     def test_compute_ablation_modified_logit_diff(self):
         dataset = DummyDataset()
-        data_loader = DataLoader(dataset, batch_size=2)
+        data_loader = ExperimentDataLoader(dataset, batch_size=2)
         layers_to_ablate = [
             0,
         ]
@@ -132,11 +152,7 @@ class TestTokenwise(unittest.TestCase):
         ]
         cached_means = torch.zeros((1, 512))
 
-        (
-            orig_metric,
-            ablated_metric,
-            freeze_ablated_metric,
-        ) = compute_ablation_modified_logit_diff(
+        metrics = compute_ablation_modified_metric(
             self.model,
             data_loader,
             layers_to_ablate=layers_to_ablate,
@@ -144,13 +160,11 @@ class TestTokenwise(unittest.TestCase):
             cached_means=cached_means,
         )
 
-        assert orig_metric.shape == ablated_metric.shape
-        assert freeze_ablated_metric is None
-        assert len(orig_metric) == len(data_loader)
+        self.assertEqual(metrics.shape[1], len(data_loader))
 
     def test_compute_zeroed_attn_modified_loss(self):
         dataset = DummyDataset()
-        data_loader = DataLoader(dataset, batch_size=1)
+        data_loader = ExperimentDataLoader(dataset, batch_size=1)
         heads_to_ablate = [
             (0, 0),
         ]
@@ -168,6 +182,53 @@ class TestTokenwise(unittest.TestCase):
             atol=1e-4,
             rtol=1e-4,
         )
+
+
+class TestMaskLossAtNextPositions(unittest.TestCase):
+    def test_mask_loss(self):
+        # Setup tensors for loss, positions, and attention_mask
+        loss = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]])
+        positions = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1]])
+        attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 0, 0]])
+
+        # Expected output after mask_loss_at_next_positions is applied
+        expected_output = torch.tensor([[0.1, 0.0, 0.3, 0.0], [0.5, 0.6, 0.0, 0.0]])
+
+        # Apply mask_loss_at_next_positions
+        result = mask_loss_at_next_positions(loss, positions, attention_mask)
+
+        # Assert the result is as expected
+        self.assertTrue(torch.allclose(result, expected_output, atol=1e-4, rtol=1e-4))
+
+    def test_attention_mask(self):
+        # Setup tensors for loss, positions, and attention_mask
+        loss = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]])
+        positions = torch.tensor([[0, 0, 0, 0], [0, 0, 0, 0]])
+        attention_mask = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1]])
+
+        # Expected output after mask_loss_at_next_positions is applied
+        expected_output = torch.tensor([[0.1, 0.0, 0.3, 0.0], [0.0, 0.6, 0.0, 0.8]])
+
+        # Apply mask_loss_at_next_positions
+        result = mask_loss_at_next_positions(loss, positions, attention_mask)
+
+        # Assert the result is as expected
+        self.assertTrue(torch.allclose(result, expected_output, atol=1e-4, rtol=1e-4))
+
+    def test_no_positions_masked(self):
+        # Test when no positions should be masked
+        loss = torch.randn(2, 4)
+        positions = torch.zeros(2, 4)
+        attention_mask = torch.ones(2, 4)
+
+        # The result should be identical to loss as no positions are masked
+        expected_output = loss.clone()
+
+        # Apply mask_loss_at_next_positions
+        result = mask_loss_at_next_positions(loss, positions, attention_mask)
+
+        # Assert the result is as expected
+        self.assertTrue(torch.equal(result, expected_output))
 
 
 if __name__ == "__main__":

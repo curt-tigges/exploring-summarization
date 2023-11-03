@@ -1,10 +1,10 @@
+import os
 import einops
 from functools import partial
 import torch
 import numpy as np
 import datasets
 from torch import Tensor
-from torch.utils.data import DataLoader
 from datasets import (
     load_dataset,
     concatenate_datasets,
@@ -26,15 +26,6 @@ from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
 import pandas as pd
 from circuitsvis.activations import text_neuron_activations
-from utils.store import (
-    load_array,
-    save_html,
-    save_array,
-    is_file,
-    get_model_name,
-    clean_label,
-    save_text,
-)
 from utils.cache import resid_names_filter
 from utils.circuit_analysis import get_logit_diff
 from utils.ablation import (
@@ -42,7 +33,8 @@ from utils.ablation import (
     freeze_attn_pattern_hook,
     convert_to_tensors,
 )
-
+from utils.datasets import ExperimentDataLoader
+from utils.store import create_file_name, ResultsFile
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -116,20 +108,31 @@ def get_zeroed_dir_vector(
 # -------------------- ACTIVATION UTILS --------------------
 def get_layerwise_token_mean_activations(
     model: HookedTransformer,
-    data_loader: DataLoader,
+    data_loader: ExperimentDataLoader,
     token_id: int,
     device: torch.device = DEFAULT_DEVICE,
+    cached: bool = True,
 ) -> Float[Tensor, "layer d_model"]:
     """Get the mean value of a particular token id across a dataset for each layer of a model
 
     Args:
         model: HookedTransformer model
-        data_loader: DataLoader for the dataset
+        data_loader: ExperimentDataLoader for the dataset
         token_id: Token id to get the mean value of
 
     Returns:
         token_mean_values: Tensor of shape (num_layers, d_model) containing the mean value of token_id for each layer
     """
+    file = ResultsFile(
+        "mean_token_acts",
+        model_name=model.cfg.model_name,
+        dataset=data_loader.name,
+        token_id=token_id,
+        extension="pt",
+    )
+    if cached and file.exists():
+        return torch.load(file_path)
+
     num_layers = model.cfg.n_layers
     d_model = model.cfg.d_model
 
@@ -157,6 +160,8 @@ def get_layerwise_token_mean_activations(
 
     token_mean_values = activation_sums / token_count
 
+    if cached:
+        torch.save(token_mean_values.cpu(), file.path)
     return token_mean_values
 
 
@@ -180,12 +185,32 @@ def zero_attention_pos_hook(
     return pattern
 
 
+def mask_loss_at_next_positions(
+    loss: Float[Tensor, "batch seq_len"],
+    positions: Float[Tensor, "batch seq_len"],
+    attention_mask: Float[Tensor, "batch seq_len"],
+) -> Float[Tensor, "batch seq_len"]:
+    """
+    We want to ignore loss changes immediately following the token of interest.
+    """
+    shifted_batch_pos = torch.roll(positions, shifts=1, dims=1)
+    shifted_batch_pos[:, 0] = 0  # Set the first column to zero because roll is circular
+
+    # Zero out loss_diff positions
+    # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
+    loss[shifted_batch_pos == 1] = 0
+
+    # set all masked positions to zero
+    loss[attention_mask == 0] = 0
+    return loss
+
+
 # -------------------- EXPERIMENTS --------------------
-def compute_ablation_modified_logit_diff(
+def compute_ablation_modified_metric(
     model: HookedTransformer,
-    data_loader: DataLoader,
-    layers_to_ablate: List[int],
-    heads_to_freeze: List[Tuple[int, int]],
+    data_loader: ExperimentDataLoader,
+    layers_to_ablate: List[int] | Literal["all"] = "all",
+    heads_to_freeze: List[Tuple[int, int]] | Literal["all"] = "all",
     cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
     frozen_attn_variant: bool = False,
     direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
@@ -193,36 +218,66 @@ def compute_ablation_modified_logit_diff(
     all_positions: bool = False,
     metric: Literal["logits", "loss"] = "logits",
     device: torch.device = DEFAULT_DEVICE,
-) -> Tuple[
-    Float[Tensor, "batch *pos"],
-    Float[Tensor, "batch *pos"],
-    Optional[Float[Tensor, "batch *pos"]],
-]:
+    cached: bool = True,
+) -> Float[Tensor, "experiment batch *pos"]:
     """
     Computes the change in metric (between two answers) when the activations of
     a particular token are mean-ablated.
 
+    If cached_means is specified, then we ablate the full residual stream at every layer.
+    if direction_vectors is specified, then we only mean-ablate those directions.
+
     Args:
         model: HookedTransformer model
-        data_loader: DataLoader for the dataset
+        data_loader: ExperimentDataLoader for the dataset
         layers_to_ablate: List of layers to ablate
         heads_to_freeze: List of heads to freeze
         cached_means:
             List of tensors of shape (layer, d_model)
             containing the mean value of a given token for each layer
+        frozen_attn_variant:
+            If True, repeat the experiment with attention frozen
+        direction_vectors:
+            List of tensors of shape (layer, d_model)
+            containing the direction vector for each layer
+        multiplier:
+            Multiplier for the direction vector
+        all_positions:
+            If True, ablate all positions in the sequence.
+            Otherwise, only ablate the positions specified in the data loader.
+        metric:
+            Metric to compute. Either "logits" or "loss".
+            N.B. we only mask subsequent positions for loss.
+        device:
+            Device to run the experiment on
 
     Returns:
-        orig_metric_list:
-            List of tensors of shape (batch, *pos)
-            containing the metric for each item in the batch before ablation
-        ablated_metric_list:
-            List of tensors of shape (batch, *pos)
-            containing the metric for each item in the batch after ablation
-        freeze_ablated_metric_list:
-            List of tensors of shape (batch, *pos)
-            containing the metric for each item in the batch after ablation with attention frozen
+
     """
     assert cached_means is not None or direction_vectors is not None
+    file = ResultsFile(
+        "ablation_modified_metric",
+        model_name=model.cfg.model_name,
+        dataset=data_loader.name,
+        layers_to_ablate=layers_to_ablate,
+        heads_to_freeze=heads_to_freeze,
+        metric=metric,
+        direction_vectors=direction_vectors,
+        multiplier=multiplier,
+        all_positions=all_positions,
+        frozen_attn_variant=frozen_attn_variant,
+        extension="pt",
+    )
+    if cached and file.exists():
+        return torch.load(file_path)
+    if layers_to_ablate == "all":
+        layers_to_ablate = list(range(model.cfg.n_layers))
+    if heads_to_freeze == "all":
+        heads_to_freeze = [
+            (layer, head)
+            for layer in range(model.cfg.n_layers)
+            for head in range(model.cfg.n_heads)
+        ]
 
     orig_metric_list = []
     ablated_metric_list = []
@@ -298,17 +353,11 @@ def compute_ablation_modified_logit_diff(
                 [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
             )
             loss_diff = hooked_loss - orig_metric
-            shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
-            shifted_batch_pos[
-                :, 0
-            ] = 0  # Set the first column to zero because roll is circular
-
-            # Zero out loss_diff positions
-            # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
-            loss_diff[shifted_batch_pos == 1] = 0
-
-            # set all masked positions to zero
-            loss_diff[batch_value["attention_mask"] == 0] = 0
+            loss_diff = mask_loss_at_next_positions(
+                loss_diff,
+                positions=batch_pos,
+                attention_mask=batch_value["attention_mask"],
+            )
 
             ablated_metric_list.append(loss_diff)
 
@@ -362,17 +411,11 @@ def compute_ablation_modified_logit_diff(
                     dim=1,
                 )
                 loss_diff = hooked_loss - orig_metric
-                shifted_batch_pos = torch.roll(batch_pos, shifts=1, dims=1)
-                shifted_batch_pos[
-                    :, 0
-                ] = 0  # Set the first column to zero because roll is circular
-
-                # Zero out loss_diff positions
-                # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
-                loss_diff[shifted_batch_pos == 1] = 0
-
-                # set all masked positions to zero
-                loss_diff[batch_value["attention_mask"] == 0] = 0
+                loss_diff = mask_loss_at_next_positions(
+                    loss_diff,
+                    positions=batch_pos,
+                    attention_mask=batch_value["attention_mask"],
+                )
 
                 freeze_ablated_metric_list.append(loss_diff)
 
@@ -381,16 +424,19 @@ def compute_ablation_modified_logit_diff(
     assert len(orig_metric_list) == len(ablated_metric_list)
     assert len(orig_metric_list) == len(data_loader)
 
-    return (
-        torch.cat(orig_metric_list),
-        torch.cat(ablated_metric_list),
-        torch.cat(freeze_ablated_metric_list) if frozen_attn_variant else None,
-    )
+    to_stack = [torch.cat(orig_metric_list), torch.cat(ablated_metric_list)]
+    if frozen_attn_variant:
+        assert len(orig_metric_list) == len(freeze_ablated_metric_list)
+        to_stack.append(torch.cat(freeze_ablated_metric_list))
+    output = torch.stack(to_stack, dim=0)
+    if cached:
+        torch.save(output.cpu(), file.path)
+    return output
 
 
 def compute_zeroed_attn_modified_loss(
     model: HookedTransformer,
-    data_loader: DataLoader,
+    data_loader: ExperimentDataLoader,
     heads_to_ablate: List[Tuple[int, int]],
     token_ids: List[int] = [13],
     device: torch.device = DEFAULT_DEVICE,
