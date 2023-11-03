@@ -160,8 +160,7 @@ def get_layerwise_token_mean_activations(
 
     token_mean_values = (activation_sums / token_count).cpu()
 
-    if cached:
-        torch.save(token_mean_values, file.path)
+    torch.save(token_mean_values, file.path)
     return token_mean_values
 
 
@@ -449,8 +448,7 @@ def compute_ablation_modified_metric(
             ] = freeze_ablated_metric.cpu()
             model.reset_hooks()
 
-    if cached:
-        torch.save(output, file.path)
+    torch.save(output, file.path)
     return output
 
 
