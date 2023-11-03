@@ -248,13 +248,15 @@ def compute_ablation_modified_metric(
         metric:
             Metric to compute. Either "logits" or "loss".
             N.B. we only mask subsequent positions for loss.
+            Also note that we compute the logit diff for only the last token in each sequence.
         device:
             Device to run the experiment on
 
     Returns:
-
+        output: Tensor of shape (num_experiments, batch_size, sequence_length)
     """
     assert cached_means is not None or direction_vectors is not None
+    assert metric in ["logits", "loss"]
     file = ResultsFile(
         "ablation_modified_metric",
         model_name=model.cfg.model_name,
@@ -269,7 +271,7 @@ def compute_ablation_modified_metric(
         extension="pt",
     )
     if cached and file.exists():
-        return torch.load(file_path)
+        return torch.load(file.path)
     if layers_to_ablate == "all":
         layers_to_ablate = list(range(model.cfg.n_layers))
     if heads_to_freeze == "all":
@@ -278,12 +280,30 @@ def compute_ablation_modified_metric(
             for layer in range(model.cfg.n_layers)
             for head in range(model.cfg.n_heads)
         ]
-
-    orig_metric_list = []
-    ablated_metric_list = []
-    freeze_ablated_metric_list = []
-
-    for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
+    experiment_names = [
+        "orig",
+        "ablated",
+    ]
+    if frozen_attn_variant:
+        experiment_names.append("freeze_ablated")
+    experiment_index = {name: i for i, name in enumerate(experiment_names)}
+    if metric == "logits":
+        out_shape = (len(experiment_names), data_loader.dataset.num_rows)
+    else:
+        assert metric == "loss"
+        out_shape = (
+            len(experiment_names),
+            data_loader.dataset.num_rows,
+            model.cfg.n_ctx,
+        )
+    output = torch.zeros(
+        out_shape,
+        device="cpu",
+        dtype=torch.float32,
+    )
+    batch_size = data_loader.batch_size
+    assert batch_size is not None
+    for batch_idx, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
         if all_positions:
             batch_pos = batch_value["attention_mask"].to(device)
@@ -302,7 +322,8 @@ def compute_ablation_modified_metric(
                 orig_logits,
                 mask=batch_value["attention_mask"],
                 answer_tokens=batch_value["answers"],
-            ).reshape(1)
+                per_prompt=True,
+            )
         else:
             assert metric == "loss"
             # get the loss for each token in the batch
@@ -314,7 +335,10 @@ def compute_ablation_modified_metric(
             orig_metric = torch.cat(
                 [torch.zeros((orig_loss.shape[0], 1)).to(device), orig_loss], dim=1
             )
-        orig_metric_list.append(orig_metric)
+        output[
+            experiment_index["orig"],
+            batch_idx * batch_size : (batch_idx + 1) * batch_size,
+        ] = orig_metric.cpu()
 
         # Step 2: repeat with tokens ablated
 
@@ -336,12 +360,12 @@ def compute_ablation_modified_metric(
             # check to see if ablated_logits has any nan values
             if torch.isnan(ablated_logits).any():
                 print("ablated logits has nan values")
-            ablated_ld = get_logit_diff(
+            ablated_metric = get_logit_diff(
                 ablated_logits,
                 mask=batch_value["attention_mask"],
                 answer_tokens=batch_value["answers"],
-            ).reshape(1)
-            ablated_metric_list.append(ablated_ld)
+                per_prompt=True,
+            )
         else:
             assert metric == "loss"
             # get the loss for each token when run with hooks
@@ -353,14 +377,16 @@ def compute_ablation_modified_metric(
                 [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
             )
             loss_diff = hooked_loss - orig_metric
-            loss_diff = mask_loss_at_next_positions(
+            ablated_metric = mask_loss_at_next_positions(
                 loss_diff,
                 positions=batch_pos,
                 attention_mask=batch_value["attention_mask"],
             )
 
-            ablated_metric_list.append(loss_diff)
-
+        output[
+            experiment_index["ablated"],
+            batch_idx * batch_size : (batch_idx + 1) * batch_size,
+        ] = ablated_metric.cpu()
         model.reset_hooks()
 
         # Step 3: repeat with ablation and frozen attention
@@ -390,12 +416,12 @@ def compute_ablation_modified_metric(
                 freeze_ablated_logits = model(
                     batch_tokens, return_type="logits", prepend_bos=False
                 )
-                freeze_ablated_ld = get_logit_diff(
+                freeze_ablated_metric = get_logit_diff(
                     freeze_ablated_logits,
                     mask=batch_value["attention_mask"],
                     answer_tokens=batch_value["answers"],
-                ).reshape(1)
-                freeze_ablated_metric_list.append(freeze_ablated_ld)
+                    per_prompt=True,
+                )
             else:
                 assert metric == "loss"
                 # get the loss for each token when run with hooks
@@ -411,26 +437,20 @@ def compute_ablation_modified_metric(
                     dim=1,
                 )
                 loss_diff = hooked_loss - orig_metric
-                loss_diff = mask_loss_at_next_positions(
+                freeze_ablated_metric = mask_loss_at_next_positions(
                     loss_diff,
                     positions=batch_pos,
                     attention_mask=batch_value["attention_mask"],
                 )
 
-                freeze_ablated_metric_list.append(loss_diff)
-
+            output[
+                experiment_index["freeze_ablated"],
+                batch_idx * batch_size : (batch_idx + 1) * batch_size,
+            ] = freeze_ablated_metric.cpu()
             model.reset_hooks()
 
-    assert len(orig_metric_list) == len(ablated_metric_list)
-    assert len(orig_metric_list) == len(data_loader)
-
-    to_stack = [torch.cat(orig_metric_list), torch.cat(ablated_metric_list)]
-    if frozen_attn_variant:
-        assert len(orig_metric_list) == len(freeze_ablated_metric_list)
-        to_stack.append(torch.cat(freeze_ablated_metric_list))
-    output = torch.stack(to_stack, dim=0)
     if cached:
-        torch.save(output.cpu(), file.path)
+        torch.save(output, file.path)
     return output
 
 
