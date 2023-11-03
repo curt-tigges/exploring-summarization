@@ -233,7 +233,9 @@ def _ablate_resid_with_precalc_mean(
     batch_indices, sequence_positions = torch.where(pos_mask == 1)
 
     # Replace the corresponding positions in component with cached_means[layer]
-    component[batch_indices, sequence_positions] = cached_means[layer]
+    component[batch_indices, sequence_positions] = cached_means[layer].to(
+        device=component.device
+    )
 
     return component
 
@@ -262,12 +264,14 @@ def _ablate_resid_with_direction(
     assert hook.name is not None and "resid" in hook.name
 
     # Normalize the direction vector to make sure it's a unit vector
-    D_normalized = direction_vector[layer] / torch.norm(direction_vector[layer])
+    direction_normalized = (
+        direction_vector[layer] / torch.norm(direction_vector[layer])
+    ).to(device=component.device)
 
     # Calculate the projection of component onto direction_vector
     proj = (
-        einops.einsum(component, D_normalized, "b s d, d -> b s").unsqueeze(-1)
-        * D_normalized
+        einops.einsum(component, direction_normalized, "b s d, d -> b s").unsqueeze(-1)
+        * direction_normalized
     )
 
     # Ablate the direction from component
