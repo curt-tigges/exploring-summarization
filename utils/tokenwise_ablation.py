@@ -131,7 +131,7 @@ def get_layerwise_token_mean_activations(
         extension="pt",
     )
     if cached and file.exists():
-        return torch.load(file_path)
+        return torch.load(file.path)
 
     num_layers = model.cfg.n_layers
     d_model = model.cfg.d_model
