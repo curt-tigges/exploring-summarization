@@ -12,6 +12,8 @@ import re
 import pickle
 from datasets import dataset_dict
 
+from utils.datasets import ExperimentDataLoader
+
 
 def add_styling(html: str):
     # Extract the table ID from the HTML using regex
@@ -112,6 +114,8 @@ def args_to_file_name(**kwargs):
             value = str(value).lower()
         elif isinstance(value, HookedTransformer):
             value = value.cfg.model_name
+        elif isinstance(value, ExperimentDataLoader):
+            value = value.name
         elif isinstance(value, torch.Tensor):
             value = "_".join([str(d) for d in value.shape])
         elif isinstance(value, str):
