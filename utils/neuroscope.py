@@ -258,13 +258,13 @@ def remove_layer_neuron_dims(
 
 
 def add_layer_neuron_dims(
-    activations: Float[Tensor, "row pos ..."],
-):
+    activations: Float[Tensor, "..."],
+) -> Float[Tensor, "*row pos layer neuron"]:
     if activations.ndim == 4:
         return activations
     elif activations.ndim == 3:
         return activations.unsqueeze(-1)
-    elif activations.ndim == 2:
+    elif activations.ndim <= 2:
         return activations.unsqueeze(-1).unsqueeze(-1)
     else:
         raise ValueError(
