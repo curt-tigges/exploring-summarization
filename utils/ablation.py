@@ -62,7 +62,7 @@ def zero_ablate_component(component: Float[Tensor, "..."]) -> Float[Tensor, "...
     return torch.zeros_like(component)
 
 
-def zero_attention_pos_hook(
+def zero_ablate_attention_pos_hook(
     pattern: Float[Tensor, "batch head seq_Q seq_K"],
     hook: HookPoint,
     pos_by_batch: List[List[int]],
