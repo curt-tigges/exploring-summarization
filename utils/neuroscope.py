@@ -225,7 +225,7 @@ def get_batch_pos_mask(
 
 
 def remove_layer_neuron_dims(
-    all_activations: Float[Tensor, "row pos *layer *neuron"],
+    all_activations: Float[Tensor, "row pos ..."],
     layer: Optional[int] = None,
     neuron: Optional[int] = None,
     base_layer: Optional[int] = None,
@@ -258,7 +258,7 @@ def remove_layer_neuron_dims(
 
 
 def add_layer_neuron_dims(
-    activations: Float[Tensor, "row pos *layer *neuron"],
+    activations: Float[Tensor, "row pos ..."],
 ):
     if activations.ndim == 4:
         return activations
@@ -274,7 +274,7 @@ def add_layer_neuron_dims(
 
 
 def plot_topk_onesided(
-    all_activations: Float[Tensor, "row pos *layer *neuron"],
+    all_activations: Float[Tensor, "row pos ..."],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
     layer: Optional[int] = None,
@@ -407,7 +407,7 @@ def plot_topk_onesided(
 
 
 def plot_topk(
-    activations: Float[Tensor, "row pos *layer *neuron"],
+    activations: Float[Tensor, "row pos ..."],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
     k: int = 10,
