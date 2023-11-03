@@ -105,7 +105,7 @@ def args_to_file_name(**kwargs):
     file_name = ""
     for key, value in kwargs.items():
         if isinstance(value, list) or isinstance(value, tuple):
-            value = nested_list_to_string(value)
+            value = len(value)
         elif isinstance(value, bool):
             value = str(value).lower()
         elif isinstance(value, HookedTransformer):
@@ -149,9 +149,27 @@ class ResultsFile:
         if not os.path.exists(f"{root}/{result_type}"):
             os.mkdir(f"{root}/{result_type}")
         self.name = name
-        self.extension = extension
+        self.extension = extension.replace(".", "")
         self.file_name = create_file_name(name, extension, **kwargs)
         self.path = f"{root}/{result_type}/{self.file_name}"
 
     def exists(self):
         return os.path.exists(self.path)
+
+    def save(self, data):
+        if isinstance(data, str):
+            with open(self.path, "w") as f:
+                f.write(data)
+        elif isinstance(data, torch.Tensor):
+            torch.save(data, self.path)
+        else:
+            raise ValueError(f"Unimplemented type for save: {type(data)}")
+
+    def load(self):
+        if self.extension in ("txt", "html"):
+            with open(self.path, "r") as f:
+                return f.read()
+        elif self.extension == "pt":
+            return torch.load(self.path)
+        else:
+            raise ValueError(f"Unimplemented extension for load: {self.extension}")
