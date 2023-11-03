@@ -63,6 +63,7 @@ class DummyDataset(Dataset):
         ]
         self.builder_name = "dummy"
         self.split = "dummy"
+        self.num_rows = len(self.tokens)
 
     def __len__(self):
         return len(self.tokens)
