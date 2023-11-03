@@ -299,7 +299,6 @@ def plot_topk_onesided(
     device = activations.device
     assert not (inclusions is not None and exclusions is not None)
     label = "positive" if largest else "negative"
-    layers = model.cfg.n_layers + 1
     if verbose:
         print(f"Plotting top {k} {label} examples for layer {layer}")
 
@@ -340,7 +339,7 @@ def plot_topk_onesided(
     ]
     # Print the  most positive and negative examples and their activations
     print(f"Top {k} most {label} examples:")
-    zeros = torch.zeros((1, layers), device=device, dtype=torch.float32)
+    zeros: Float[Tensor, "1 ..."] = torch.zeros_like(all_activations[0, :1])
     assert model.tokenizer is not None
     texts = []
     text_to_not_repeat = set()
