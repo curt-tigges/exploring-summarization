@@ -11,7 +11,7 @@ import einops
 from utils.cache import resid_names_filter
 
 
-def handle_position(
+def handle_position_argument(
     pos: Union[Literal["each"], int, List[int], Int[Tensor, "batch pos ..."]],
     component: Int[Tensor, "batch pos ..."],
 ) -> Int[Tensor, "subset_pos"]:
@@ -25,7 +25,7 @@ def handle_position(
     return pos
 
 
-def resample_cache_component(
+def resample_ablate_component(
     component: Float[Tensor, "batch ..."], seed: int = 77
 ) -> Float[Tensor, "batch ..."]:
     """Resample-ablates a batch tensor according to the index of the first dimension"""
@@ -39,7 +39,7 @@ def resample_cache_component(
     return component
 
 
-def mean_over_cache_component(
+def mean_ablate_component(
     component: Float[Tensor, "batch ..."]
 ) -> Float[Tensor, "batch ..."]:
     """
@@ -57,7 +57,7 @@ def mean_over_cache_component(
     return copy_to_ablate
 
 
-def zero_cache_component(component: Tensor) -> Tensor:
+def zero_ablate_component(component: Float[Tensor, "..."]) -> Float[Tensor, "..."]:
     """Zero-ablates a batch tensor"""
     return torch.zeros_like(component)
 
@@ -109,7 +109,7 @@ def freeze_layer_pos_hook(
 ) -> Float[Tensor, "batch pos ..."]:
     """Base function to freeze the layer for a given position, layer and head"""
     assert hook.name is not None and component_type in hook.name
-    pos_t = handle_position(pos, component)
+    pos_t = handle_position_argument(pos, component)
     for p in pos_t:
         component[:, p, :] = cache[f"blocks.{layer}.{component_type}"][:, p, :]
     return component
@@ -140,7 +140,7 @@ def freeze_attn_head_pos_hook(
 ):
     """Freeze the attention head for a given position, layer and head"""
     assert hook.name is not None and component_type in hook.name
-    pos_t = handle_position(pos, component)
+    pos_t = handle_position_argument(pos, component)
     for p in pos_t:
         component[:, p, head_idx, :] = cache[f"blocks.{layer}.attn.{component_type}"][
             :, p, head_idx, :
@@ -161,7 +161,7 @@ def ablate_layer_pos_hook(
 ) -> Float[Tensor, "batch pos d_mlp"]:
     """Base function to ablate the layer for a given position, layer and head"""
     assert hook.name is not None and component_type in hook.name
-    pos_t = handle_position(pos, component)
+    pos_t = handle_position_argument(pos, component)
     if ablation_func is None:
         ablation_func = lambda x: x
     for p in pos_t:
@@ -200,7 +200,7 @@ def ablate_attn_head_pos_hook(
     head_idx: int = 0,
 ) -> Float[Tensor, "batch pos d_head"]:
     assert hook.name is not None and component_type in hook.name
-    pos_t = handle_position(pos, component)
+    pos_t = handle_position_argument(pos, component)
     if ablation_func is None:
         ablation_func = lambda x: x
     for p in pos_t:
