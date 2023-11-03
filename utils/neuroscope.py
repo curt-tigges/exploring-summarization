@@ -94,7 +94,7 @@ def plot_neuroscope(
     text: Union[str, List[str]],
     model: HookedTransformer,
     centered: bool,
-    activations: Optional[Float[Tensor, "pos layer neuron"]] = None,
+    activations: Optional[Float[Tensor, "pos ..."]] = None,
     special_dir: Optional[Float[Tensor, "d_model"]] = None,
     verbose=False,
 ):
@@ -105,7 +105,7 @@ def plot_neuroscope(
     If you don't need centering or projection, use `text_neuron_activations` directly.
     """
     assert activations is not None or special_dir is not None
-    tokens: Int[Tensor, "batch pos"] = model.to_tokens(text)
+    tokens: Int[Tensor, "1 pos"] = model.to_tokens(text)
     if isinstance(text, str):
         str_tokens = model.to_str_tokens(tokens, prepend_bos=False)
     else:
@@ -116,14 +116,14 @@ def plot_neuroscope(
         assert special_dir is not None
         if verbose:
             print("Computing activations")
-        projections: Float[Tensor, "batch pos layer"] = get_projections_for_text(
+        projections: Float[Tensor, "1 pos layer"] = get_projections_for_text(
             tokens, special_dir=special_dir, model=model
         )
-        activations = einops.rearrange(
-            projections, "batch pos layer -> pos layer batch"
-        )
-        if verbose:
-            print(f"Activations shape: {activations.shape}")
+        activations = einops.rearrange(projections, "1 pos layer -> pos layer 1")
+    else:
+        activations = add_layer_neuron_dims(activations)
+    if verbose:
+        print(f"Activations shape: {activations.shape}")
     if centered:
         if verbose:
             print("Centering activations")
