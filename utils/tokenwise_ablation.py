@@ -158,10 +158,10 @@ def get_layerwise_token_mean_activations(
                 "batch seq d_model, batch seq -> d_model",
             )
 
-    token_mean_values = activation_sums / token_count
+    token_mean_values = (activation_sums / token_count).cpu()
 
     if cached:
-        torch.save(token_mean_values.cpu(), file.path)
+        torch.save(token_mean_values, file.path)
     return token_mean_values
 
 
