@@ -104,7 +104,7 @@ def args_to_file_name(**kwargs):
     """Converts a dictionary of arguments to a file name"""
     file_name = ""
     for key, value in kwargs.items():
-        if value is None or len(value) == 0:
+        if value is None or (hasattr(value, "__len__") and len(value) == 0):
             continue
         elif isinstance(value, list) or isinstance(value, tuple):
             value = len(value)
