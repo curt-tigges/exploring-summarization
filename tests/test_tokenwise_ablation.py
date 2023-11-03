@@ -64,6 +64,7 @@ class DummyDataset(Dataset):
         self.builder_name = "dummy"
         self.split = "dummy"
         self.num_rows = len(self.tokens)
+        self.seq_len = self.tokens.shape[1]
 
     def __len__(self):
         return len(self.tokens)
@@ -159,9 +160,12 @@ class TestTokenwise(unittest.TestCase):
             layers_to_ablate=layers_to_ablate,
             heads_to_freeze=list(heads_to_freeze),
             cached_means=cached_means,
+            frozen_attn_variant=False,
+            cached=False,
         )
 
-        self.assertEqual(metrics.shape[1], len(data_loader))
+        self.assertEqual(metrics.shape[0], 2)
+        self.assertEqual(metrics.shape[1], data_loader.dataset.num_rows)
 
     def test_compute_zeroed_attn_modified_loss(self):
         dataset = DummyDataset()
