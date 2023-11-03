@@ -122,6 +122,8 @@ def args_to_file_name(**kwargs):
             value = str(value)
         elif isinstance(value, float):
             value = "{:.2f}".format(value).replace(".", "_")
+        elif isinstance(value, str):
+            pass
         else:
             raise ValueError(f"Unimplemented type: {type(value)}")
         assert isinstance(value, str), f"Value is not a string: {value}"
