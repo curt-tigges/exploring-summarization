@@ -109,7 +109,7 @@ def args_to_file_name(**kwargs):
         if value is None or (hasattr(value, "__len__") and len(value) == 0):
             continue
         elif isinstance(value, list) or isinstance(value, tuple):
-            value = len(value)
+            value = f"{len(value):d}"
         elif isinstance(value, bool):
             value = str(value).lower()
         elif isinstance(value, HookedTransformer):
@@ -118,15 +118,14 @@ def args_to_file_name(**kwargs):
             value = value.name
         elif isinstance(value, torch.Tensor):
             value = "_".join([str(d) for d in value.shape])
-        elif isinstance(value, str):
-            value = clean_string(value)
         elif isinstance(value, int):
             value = str(value)
         elif isinstance(value, float):
             value = "{:.2f}".format(value).replace(".", "_")
         else:
             raise ValueError(f"Unimplemented type: {type(value)}")
-
+        assert isinstance(value, str), f"Value is not a string: {value}"
+        value = clean_string(value)
         file_name += f"{key}__{value}__"
     assert_alphanumeric_underscore(file_name)
     return file_name[:-2]
