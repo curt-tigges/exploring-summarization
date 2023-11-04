@@ -9,6 +9,7 @@ from datasets import load_dataset
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import tokenize_and_concatenate, get_act_name
 from circuitsvis.activations import text_neuron_activations
+from circuitsvis.topk_samples import topk_samples
 from IPython.display import display
 from utils.cache import resid_names_filter
 from utils.store import ResultsFile
@@ -72,7 +73,6 @@ def get_projections_for_text(
     tokens: Int[Tensor, "batch pos"],
     special_dir: Float[Tensor, "d_model"],
     model: HookedTransformer,
-    device: str = "cpu",
 ) -> Float[Tensor, "batch pos layer"]:
     """Computes residual stream projections across all layers and positions for a given text."""
     _, cache = model.run_with_cache(tokens, names_filter=resid_names_filter)
@@ -85,24 +85,40 @@ def get_projections_for_text(
         emb /= emb.norm(dim=-1, keepdim=True)
         act: Float[Tensor, "batch pos"] = einops.einsum(
             emb, special_dir, "batch pos d_model, d_model -> batch pos"
-        ).to(device=device)
+        ).cpu()
         acts_by_layer.append(act)
     return torch.stack(acts_by_layer, dim=2)
 
 
-def plot_neuroscope(
+def get_activations_from_direction(
+    tokens: Int[Tensor, "1 pos"],
+    special_dir: Float[Tensor, "d_model"],
+    model: HookedTransformer,
+) -> Float[Tensor, "pos layer 1"]:
+    projections: Float[Tensor, "1 pos layer"] = get_projections_for_text(
+        tokens, special_dir=special_dir, model=model
+    )
+    activations = einops.rearrange(projections, "1 pos layer -> pos layer 1")
+    return activations
+
+
+def plot_activations(
     text: Union[str, List[str]],
     model: HookedTransformer,
     centered: bool,
     activations: Optional[Float[Tensor, "pos ..."]] = None,
     special_dir: Optional[Float[Tensor, "d_model"]] = None,
     verbose=False,
+    first_dimension_name: Optional[str] = None,
+    second_dimension_name: Optional[str] = None,
+    first_dimension_labels: Optional[List[str]] = None,
+    second_dimension_labels: Optional[List[str]] = None,
+    show_selectors: bool = True,
 ):
     """
     Wrapper around CircuitVis's `text_neuron_activations`.
-    Performs centering if `centred` is True.
+    Performs centering if `centered` is True.
     Computes activations based on projecting onto a resid stream direction if not provided.
-    If you don't need centering or projection, use `text_neuron_activations` directly.
     """
     assert activations is not None or special_dir is not None
     tokens: Int[Tensor, "1 pos"] = model.to_tokens(text)
@@ -116,10 +132,9 @@ def plot_neuroscope(
         assert special_dir is not None
         if verbose:
             print("Computing activations")
-        projections: Float[Tensor, "1 pos layer"] = get_projections_for_text(
+        activations = get_activations_from_direction(
             tokens, special_dir=special_dir, model=model
         )
-        activations = einops.rearrange(projections, "1 pos layer -> pos layer 1")
     else:
         activations = add_layer_neuron_dims(activations)
     if verbose:
@@ -145,12 +160,17 @@ def plot_neuroscope(
         f"tokens={str_tokens}, "
         f"activations={activations.shape}"
     )
+    if second_dimension_name is None and activations.shape[3] == 1:
+        second_dimension_name = "Model"
+        second_dimension_labels = [model.cfg.model_name]
     return text_neuron_activations(
         tokens=str_tokens,
         activations=activations,
-        first_dimension_name="Layer (resid_pre)",
-        second_dimension_name="Model",
-        second_dimension_labels=[model.cfg.model_name],
+        first_dimension_name=first_dimension_name,
+        first_dimension_labels=first_dimension_labels,
+        second_dimension_name=second_dimension_name,
+        second_dimension_labels=second_dimension_labels,
+        show_selectors=show_selectors,
     )
 
 
@@ -273,34 +293,18 @@ def add_layer_neuron_dims(
         )
 
 
-def plot_topk_onesided(
-    all_activations: Float[Tensor, "row pos ..."],
+def mask_activations(
+    activations: Float[Tensor, "row pos ..."],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
-    layer: Optional[int] = None,
-    neuron: Optional[int] = None,
-    k: int = 10,
-    largest: bool = True,
-    window_size: int = 10,
-    centred: bool = True,
+    device: torch.device,
+    k: int,
+    largest: bool,
     inclusions: Optional[List[str]] = None,
     exclusions: Optional[List[str]] = None,
     verbose: bool = False,
-    base_layer: Optional[int] = None,
-    local: bool = True,
-):
-    """
-    One-sided topk plotting.
-    Main entrypoint should be `plot_topk`.
-    """
-    activations: Float[Tensor, "row pos"] = remove_layer_neuron_dims(
-        all_activations, layer=layer, neuron=neuron, base_layer=base_layer
-    )
-    device = activations.device
+) -> Float[Tensor, "row pos ..."]:
     assert not (inclusions is not None and exclusions is not None)
-    label = "positive" if largest else "negative"
-    if verbose:
-        print(f"Plotting top {k} {label} examples for layer {layer}")
 
     if largest:
         ignore_value = torch.tensor(-np.inf, device=device, dtype=torch.float32)
@@ -324,6 +328,46 @@ def plot_topk_onesided(
         masked_activations = activations.where(mask, other=ignore_value)
     else:
         masked_activations = activations
+    return masked_activations
+
+
+def plot_topk_onesided(
+    all_activations: Float[Tensor, "row pos ..."],
+    dataloader: torch.utils.data.DataLoader,
+    model: HookedTransformer,
+    layer: Optional[int] = None,
+    neuron: Optional[int] = None,
+    k: int = 10,
+    largest: bool = True,
+    window_size: int = 10,
+    centred: bool = True,
+    inclusions: Optional[List[str]] = None,
+    exclusions: Optional[List[str]] = None,
+    verbose: bool = False,
+    base_layer: Optional[int] = None,
+    local: bool = True,
+):
+    """
+    One-sided topk plotting.
+    Main entrypoint should be `plot_topk` for two-sided.
+    """
+    activations: Float[Tensor, "row pos"] = remove_layer_neuron_dims(
+        all_activations, layer=layer, neuron=neuron, base_layer=base_layer
+    )
+    device = activations.device
+    masked_activations = mask_activations(
+        activations,
+        dataloader=dataloader,
+        model=model,
+        device=device,
+        k=k,
+        largest=largest,
+        inclusions=inclusions,
+        exclusions=exclusions,
+        verbose=verbose,
+    )
+
+    # Get top k indices and values
     top_k_return = torch.topk(masked_activations.flatten(), k=k, largest=largest)
     assert torch.isfinite(top_k_return.values).all()
     topk_pos_indices = top_k_return.indices
@@ -337,14 +381,16 @@ def plot_topk_onesided(
     topk_pos_activations = [
         masked_activations[b, s].item() for b, s in topk_pos_indices
     ]
-    # Print the  most positive and negative examples and their activations
-    print(f"Top {k} most {label} examples:")
-    zeros: Float[Tensor, "1 ..."] = torch.zeros_like(all_activations[0, :1])
+
+    # Construct nested list of texts and activations for plotting
     assert model.tokenizer is not None
     texts = []
     text_to_not_repeat = set()
-    acts = []
-    text_sep = "\n"
+    seq_len = window_size * 2 + 1
+    acts_to_plot = torch.zeros(
+        (1, 1, k, seq_len),
+        dtype=torch.float32,
+    )
     topk_zip = zip(topk_pos_indices, topk_pos_examples, topk_pos_activations)
     for index, example, activation in topk_zip:
         example_str = model.to_string(example)
@@ -360,29 +406,26 @@ def plot_topk_onesided(
         text_window: List[str] = extract_text_window(
             batch, pos, dataloader=dataloader, model=model, window_size=window_size
         )
-        activation_window: Float[Tensor, "pos ..."] = extract_activations_window(
-            all_activations, batch, pos, window_size=window_size, dataloader=dataloader
+        assert len(text_window) == seq_len, (
+            f"Initially text window length {len(text_window)} "
+            f"does not match seq_len {seq_len}"
         )
-        assert len(text_window) == activation_window.shape[0], (
-            f"Initially text window length {len(text_window)} does not match "
-            f"activation window length {activation_window.shape[0]}"
+        activation_window: Float[Tensor, "pos"] = extract_activations_window(
+            activations, batch, pos, window_size=window_size, dataloader=dataloader
+        )
+        assert len(activation_window) == seq_len, (
+            f"Initially activation window length {len(activation_window)} "
+            f"does not match seq_len {seq_len}"
         )
         text_flat = "".join(text_window)
         if text_flat in text_to_not_repeat:
             continue
         text_to_not_repeat.add(text_flat)
-        print(
-            f"Example: {model.to_string(example)}, Activation: {activation:.4f}, Batch: {batch}, Pos: {pos}"
-        )
-        text_window.append(text_sep)
-        activation_window = torch.cat([activation_window, zeros], dim=0)
-        assert len(text_window) == activation_window.shape[0]
-        texts += text_window
-        acts.append(activation_window)
-    acts_cat = torch.cat(acts, dim=0)
-    assert acts_cat.shape[0] == len(texts)
-    rendered_html = plot_neuroscope(
-        texts, model=model, centered=centred, activations=acts_cat, verbose=False
+        texts.append(text_window)
+        acts_to_plot[0, 0, index, :] = activation_window
+    rendered_html = topk_samples(
+        tokens=[[texts]],  # convert texts from 2D to 4D
+        activations=acts_to_plot.tolist(),
     )
     html = rendered_html.local_src if local else rendered_html.cdn_src
     file = ResultsFile(
@@ -390,6 +433,7 @@ def plot_topk_onesided(
         model=model.cfg.model_name,
         dataloader=dataloader,
         layer=layer,
+        neuron=neuron,
         k=k,
         largest=largest,
         window_size=window_size,
@@ -538,7 +582,7 @@ def _plot_top_p(
         acts.append(activation_window)
     acts_cat = einops.repeat(torch.cat(acts, dim=0), "pos layer -> pos layer 1")
     assert acts_cat.shape[0] == len(texts)
-    rendered_html = plot_neuroscope(
+    rendered_html = plot_activations(
         texts, model=model, centered=centred, activations=acts_cat, verbose=False
     )
     html = rendered_html.local_src if local else rendered_html.cdn_src
