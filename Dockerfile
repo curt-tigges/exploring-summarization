@@ -11,15 +11,18 @@ RUN pip install plotly einops protobuf==3.20.* jaxtyping==0.2.13 torchtyping jup
 COPY ./transformer_lens ./transformer_lens
 RUN pip install -e ./transformer_lens
 RUN pip install typeguard==2.13.3
-RUN pip install circuitsvis
+COPY CircuitsVis CircuitsVis
+RUN pip install -e ./CircuitsVis/python
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
 RUN apt-get install -y ca-certificates curl gnupg
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     apt-get install -y nodejs
 # Yarn
-RUN curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
-RUN echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list && \
+RUN curl -sL https://deb.nodesource.com/setup_14.x | bash - && \
+    apt-get install -y nodejs && \
+    curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - && \
+    echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list && \
     apt-get update && apt-get install -y yarn
 
 RUN pip install -U kaleido
