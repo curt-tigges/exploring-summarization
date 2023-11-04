@@ -444,7 +444,11 @@ def plot_topk_onesided(
         acts_to_plot[0, 0, sample, :] = activation_window
     rendered_html = topk_samples(
         tokens=[[texts]],  # convert texts from 2D to 4D
-        activations=acts_to_plot.tolist(),
+        activations=acts_to_plot,
+        zeroth_dimension_name="Model",
+        zeroth_dimension_labels=[model.cfg.model_name],
+        first_dimension_name="Side",
+        first_dimension_labels=["Positive" if largest else "Negative"],
     )
     html = rendered_html.local_src if local else rendered_html.cdn_src
     file = ResultsFile(
