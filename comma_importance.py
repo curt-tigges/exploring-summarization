@@ -19,6 +19,8 @@ from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
 import pandas as pd
 from circuitsvis.activations import text_neuron_activations
+from circuitsvis.topk_samples import topk_samples
+from IPython.display import HTML, display
 from utils.circuit_analysis import get_logit_diff
 
 from utils.tokenwise_ablation import (
@@ -64,42 +66,14 @@ losses = compute_ablation_modified_metric(
     device=device,
 )
 # %%
-losses.shape
-# %%
-# We're interested in the first experiment's data
-seq_len = model.cfg.n_ctx
 ablated_loss_diffs = losses[1]
-
-# Flatten the first_experiment_data tensor to apply topk
-flattened_data = ablated_loss_diffs.view(-1)
-
-# Find the top 10 values and their indices in the flattened tensor
-top_values, flat_indices = torch.topk(flattened_data, 10)
-
-# Convert the flat indices back into 2D indices corresponding to [batch, pos]
-batch_indices = flat_indices // seq_len
-pos_indices = flat_indices % seq_len
-
-# Print the results
-print(
-    "Top 10 largest values and their batch/position indices for the ablation experiment:"
-)
-for i in range(top_values.size(0)):
-    value = top_values[i].item()
-    batch_idx = batch_indices[i].item()
-    pos_idx = pos_indices[i].item()
-    context_tokens = data_loader.dataset[batch_idx]["tokens"][
-        pos_idx - 10 : pos_idx + 10
-    ]
-    context_string = model.to_str_tokens(context_tokens)
-    print(
-        f"Value: {value:.2f}, Batch index: {batch_idx}, Position index: {pos_idx}, "
-        f"Context: {context_string}"
-    )
+losses.shape
 # %%
 plot_topk_onesided(
     ablated_loss_diffs,
     data_loader,
     model,
     k=10,
+    window_size=30,
 )
+# %%

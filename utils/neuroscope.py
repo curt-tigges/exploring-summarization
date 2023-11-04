@@ -448,7 +448,7 @@ def plot_topk_onesided(
         zeroth_dimension_name="Model",
         zeroth_dimension_labels=[model.cfg.model_name],
         first_dimension_name="Side",
-        first_dimension_labels=["Positive" if largest else "Negative"],
+        first_dimension_labels=["Largest" if largest else "Smallest"],
     )
     html = rendered_html.local_src if local else rendered_html.cdn_src
     file = ResultsFile(
