@@ -182,7 +182,7 @@ def get_window(
 ) -> Tuple[int, int]:
     """Helper function to get the window around a position in a batch (used in topk plotting))"""
     lb = max(0, pos - window_size)
-    ub = min(len(dataloader.dataset[batch]["tokens"]), pos + window_size)
+    ub = min(len(dataloader.dataset[batch]["tokens"]), pos + window_size + 1)
     return lb, ub
 
 
@@ -194,9 +194,20 @@ def extract_text_window(
     window_size: int = 10,
 ) -> List[str]:
     """Helper function to get the text window around a position in a batch (used in topk plotting)"""
+    assert model.tokenizer is not None
+    expected_size = 2 * window_size + 1
     lb, ub = get_window(batch, pos, dataloader=dataloader, window_size=window_size)
     tokens = dataloader.dataset[batch]["tokens"][lb:ub]
     str_tokens = model.to_str_tokens(tokens, prepend_bos=False)
+    padding_to_add = expected_size - len(str_tokens)
+    if padding_to_add > 0 and model.tokenizer.padding_side == "right":
+        str_tokens += [model.tokenizer.bos_token] * padding_to_add
+    elif padding_to_add > 0 and model.tokenizer.padding_side == "left":
+        str_tokens = [model.tokenizer.bos_token] * padding_to_add + str_tokens
+    assert len(str_tokens) == expected_size, (
+        f"Expected text window of size {expected_size}, "
+        f"found {len(str_tokens)}: {str_tokens}"
+    )
     return str_tokens  # type: ignore
 
 
@@ -204,12 +215,29 @@ def extract_activations_window(
     activations: Float[Tensor, "row pos ..."],
     batch: int,
     pos: int,
+    model: HookedTransformer,
     dataloader: torch.utils.data.DataLoader,
     window_size: int = 10,
 ) -> Float[Tensor, "pos ..."]:
     """Helper function to get the activations window around a position in a batch (used in topk plotting)"""
+    assert model.tokenizer is not None
+    expected_size = 2 * window_size + 1
     lb, ub = get_window(batch, pos, dataloader=dataloader, window_size=window_size)
-    return activations[batch, lb:ub]
+    acts_window = activations[batch, lb:ub]
+    padding_to_add = expected_size - len(acts_window)
+    if padding_to_add > 0 and model.tokenizer.padding_side == "right":
+        acts_window = torch.cat(
+            [acts_window, torch.zeros(padding_to_add, acts_window.shape[1])], dim=0
+        )
+    elif padding_to_add > 0 and model.tokenizer.padding_side == "left":
+        acts_window = torch.cat(
+            [torch.zeros(padding_to_add, acts_window.shape[1]), acts_window], dim=0
+        )
+    assert len(acts_window) == expected_size, (
+        f"Expected activations window of size {expected_size}, "
+        f"found {len(acts_window)}: {acts_window}"
+    )
+    return acts_window
 
 
 def get_batch_pos_mask(
@@ -370,30 +398,24 @@ def plot_topk_onesided(
     # Get top k indices and values
     top_k_return = torch.topk(masked_activations.flatten(), k=k, largest=largest)
     assert torch.isfinite(top_k_return.values).all()
-    topk_pos_indices = top_k_return.indices
-    topk_pos_indices = np.array(
-        np.unravel_index(topk_pos_indices.cpu().numpy(), masked_activations.shape)
+    topk_indices = top_k_return.indices
+    topk_indices = np.array(
+        np.unravel_index(topk_indices.cpu().numpy(), masked_activations.shape)
     ).T.tolist()
     # Get the examples and their activations corresponding to the most positive and negative activations
-    topk_pos_examples = [
-        dataloader.dataset[b]["tokens"][s].item() for b, s in topk_pos_indices
-    ]
-    topk_pos_activations = [
-        masked_activations[b, s].item() for b, s in topk_pos_indices
-    ]
+    topk_tokens = [dataloader.dataset[b]["tokens"][s].item() for b, s in topk_indices]
 
     # Construct nested list of texts and activations for plotting
     assert model.tokenizer is not None
     texts = []
     text_to_not_repeat = set()
-    seq_len = window_size * 2 + 1
     acts_to_plot = torch.zeros(
-        (1, 1, k, seq_len),
+        (1, 1, k, window_size * 2 + 1),
         dtype=torch.float32,
     )
-    topk_zip = zip(topk_pos_indices, topk_pos_examples, topk_pos_activations)
-    for index, example, activation in topk_zip:
-        example_str = model.to_string(example)
+    topk_zip = zip(topk_indices, topk_tokens)
+    for index, tokens in topk_zip:
+        example_str = model.to_string(tokens)
         if inclusions is not None:
             assert (
                 example_str in inclusions
@@ -406,16 +428,13 @@ def plot_topk_onesided(
         text_window: List[str] = extract_text_window(
             batch, pos, dataloader=dataloader, model=model, window_size=window_size
         )
-        assert len(text_window) == seq_len, (
-            f"Initially text window length {len(text_window)} "
-            f"does not match seq_len {seq_len}"
-        )
         activation_window: Float[Tensor, "pos"] = extract_activations_window(
-            activations, batch, pos, window_size=window_size, dataloader=dataloader
-        )
-        assert len(activation_window) == seq_len, (
-            f"Initially activation window length {len(activation_window)} "
-            f"does not match seq_len {seq_len}"
+            activations,
+            batch,
+            pos,
+            window_size=window_size,
+            model=model,
+            dataloader=dataloader,
         )
         text_flat = "".join(text_window)
         if text_flat in text_to_not_repeat:
@@ -562,7 +581,12 @@ def _plot_top_p(
             batch, pos, dataloader=dataloader, model=model, window_size=window_size
         )
         activation_window: Float[Tensor, "pos layer"] = extract_activations_window(
-            all_activations, batch, pos, window_size=window_size, dataloader=dataloader
+            all_activations,
+            batch,
+            pos,
+            window_size=window_size,
+            model=model,
+            dataloader=dataloader,
         )
         assert len(text_window) == activation_window.shape[0], (
             f"Initially text window length {len(text_window)} "
