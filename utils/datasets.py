@@ -31,7 +31,7 @@ class ExperimentDataLoader(DataLoader):
         self,
         dataset: HFDataset,
         batch_size: int | None = 1,
-        shuffle: bool | None = None,
+        shuffle: bool = False,
         sampler: Sampler | Iterable | None = None,
         batch_sampler: Sampler[List] | Iterable[List] | None = None,
         num_workers: int = 0,
@@ -157,7 +157,7 @@ class ExperimentData(ABC):
         dataloaders = {}
         for split in self.dataset_dict.keys():
             dataloaders[split] = ExperimentDataLoader(
-                self.dataset_dict[split], batch_size=batch_size, shuffle=True
+                self.dataset_dict[split], batch_size=batch_size
             )
         return dataloaders
 
