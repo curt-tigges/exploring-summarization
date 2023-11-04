@@ -414,7 +414,7 @@ def plot_topk_onesided(
         dtype=torch.float32,
     )
     topk_zip = zip(topk_indices, topk_tokens)
-    for index, tokens in topk_zip:
+    for sample, (index, tokens) in enumerate(topk_zip):
         example_str = model.to_string(tokens)
         if inclusions is not None:
             assert (
@@ -441,7 +441,7 @@ def plot_topk_onesided(
             continue
         text_to_not_repeat.add(text_flat)
         texts.append(text_window)
-        acts_to_plot[0, 0, index, :] = activation_window
+        acts_to_plot[0, 0, sample, :] = activation_window
     rendered_html = topk_samples(
         tokens=[[texts]],  # convert texts from 2D to 4D
         activations=acts_to_plot.tolist(),
