@@ -197,7 +197,9 @@ class HFData(ExperimentData):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = tokenize_and_concatenate(
-                self.dataset_dict[split], self.model.tokenizer  # type: ignore
+                self.dataset_dict[split],
+                self.model.tokenizer,  # type: ignore
+                max_length=self.model.cfg.n_ctx,
             )
 
     def _create_attention_mask(self, example: Dict):
