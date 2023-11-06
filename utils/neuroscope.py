@@ -223,16 +223,17 @@ def extract_activations_window(
     assert model.tokenizer is not None
     expected_size = 2 * window_size + 1
     lb, ub = get_window(batch, pos, dataloader=dataloader, window_size=window_size)
-    acts_window = activations[batch, lb:ub]
+    acts_window: Float[Tensor, "pos ..."] = activations[batch, lb:ub]
     padding_to_add = expected_size - len(acts_window)
-    if padding_to_add > 0 and model.tokenizer.padding_side == "right":
-        acts_window = torch.cat(
-            [acts_window, torch.zeros(padding_to_add, acts_window.shape[1])], dim=0
+    if padding_to_add > 0:
+        padding_shape = [padding_to_add] + list(acts_window.shape[1:])
+        padding_tensor = torch.zeros(
+            padding_shape, dtype=acts_window.dtype, device=acts_window.device
         )
-    elif padding_to_add > 0 and model.tokenizer.padding_side == "left":
-        acts_window = torch.cat(
-            [torch.zeros(padding_to_add, acts_window.shape[1]), acts_window], dim=0
-        )
+        if model.tokenizer.padding_side == "right":
+            acts_window = torch.cat([acts_window, padding_tensor], dim=0)
+        elif model.tokenizer.padding_side == "left":
+            acts_window = torch.cat([padding_tensor, acts_window], dim=0)
     assert len(acts_window) == expected_size, (
         f"Expected activations window of size {expected_size}, "
         f"found {len(acts_window)}: {acts_window}"
