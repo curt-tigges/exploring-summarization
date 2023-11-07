@@ -12,6 +12,8 @@ import re
 import pickle
 from datasets import dataset_dict
 
+from utils.datasets import ExperimentDataLoader
+
 
 def add_styling(html: str):
     # Extract the table ID from the HTML using regex
@@ -104,25 +106,28 @@ def args_to_file_name(**kwargs):
     """Converts a dictionary of arguments to a file name"""
     file_name = ""
     for key, value in kwargs.items():
-        if isinstance(value, list) or isinstance(value, tuple):
-            value = nested_list_to_string(value)
+        if value is None or (hasattr(value, "__len__") and len(value) == 0):
+            continue
+        elif isinstance(value, list) or isinstance(value, tuple):
+            value = f"{len(value):d}"
         elif isinstance(value, bool):
             value = str(value).lower()
         elif isinstance(value, HookedTransformer):
             value = value.cfg.model_name
+        elif isinstance(value, ExperimentDataLoader):
+            value = value.name
         elif isinstance(value, torch.Tensor):
             value = "_".join([str(d) for d in value.shape])
-        elif value is None:
-            value = "none"
-        elif isinstance(value, str):
-            value = clean_string(value)
         elif isinstance(value, int):
             value = str(value)
         elif isinstance(value, float):
             value = "{:.2f}".format(value).replace(".", "_")
+        elif isinstance(value, str):
+            pass
         else:
             raise ValueError(f"Unimplemented type: {type(value)}")
-
+        assert isinstance(value, str), f"Value is not a string: {value}"
+        value = clean_string(value)
         file_name += f"{key}__{value}__"
     assert_alphanumeric_underscore(file_name)
     return file_name[:-2]
@@ -149,9 +154,27 @@ class ResultsFile:
         if not os.path.exists(f"{root}/{result_type}"):
             os.mkdir(f"{root}/{result_type}")
         self.name = name
-        self.extension = extension
+        self.extension = extension.replace(".", "")
         self.file_name = create_file_name(name, extension, **kwargs)
         self.path = f"{root}/{result_type}/{self.file_name}"
 
     def exists(self):
         return os.path.exists(self.path)
+
+    def save(self, data):
+        if isinstance(data, str):
+            with open(self.path, "w") as f:
+                f.write(data)
+        elif isinstance(data, torch.Tensor):
+            torch.save(data, self.path)
+        else:
+            raise ValueError(f"Unimplemented type for save: {type(data)}")
+
+    def load(self):
+        if self.extension in ("txt", "html"):
+            with open(self.path, "r") as f:
+                return f.read()
+        elif self.extension == "pt":
+            return torch.load(self.path)
+        else:
+            raise ValueError(f"Unimplemented extension for load: {self.extension}")

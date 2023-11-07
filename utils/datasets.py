@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import einops
 from functools import partial
+import re
 import torch
 import datasets
 from torch import Tensor
@@ -31,7 +32,7 @@ class ExperimentDataLoader(DataLoader):
         self,
         dataset: HFDataset,
         batch_size: int | None = 1,
-        shuffle: bool | None = None,
+        shuffle: bool = False,
         sampler: Sampler | Iterable | None = None,
         batch_sampler: Sampler[List] | Iterable[List] | None = None,
         num_workers: int = 0,
@@ -76,8 +77,14 @@ class ExperimentDataLoader(DataLoader):
         )
         if dataset.builder_name is not None:
             self._name = dataset.builder_name
-        else:
+        elif dataset.info.homepage:
             self._name = dataset.info.homepage.split("/")[-2]
+        else:
+            pattern = r"/huggingface/datasets/([^/]+/[^-]+)"
+            # Performing the regex search
+            match = re.search(pattern, dataset.cache_files[0]["filename"])
+            assert match
+            self._name = match.group(1)
         self._name += f"_{dataset.split}"
 
     @property
@@ -112,8 +119,20 @@ class ExperimentData(ABC):
         name: str | None = None,
         split: str | None = None,
         num_proc: int | None = None,
+        data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
-        dataset_dict = load_dataset(path, name, split=split, num_proc=num_proc)
+        if data_files is not None:
+            data_files = [
+                file_url.replace("blob", "resolve") for file_url in data_files
+            ]
+        if verbose:
+            print(
+                f"load_dataset: path={path}, name={name}, split={split}, num_proc={num_proc}, data_files={data_files}"
+            )
+        dataset_dict = load_dataset(
+            path=path, name=name, split=split, num_proc=num_proc, data_files=data_files
+        )
         if split is not None:
             dataset_dict = DatasetDict(
                 {
@@ -157,7 +176,7 @@ class ExperimentData(ABC):
         dataloaders = {}
         for split in self.dataset_dict.keys():
             dataloaders[split] = ExperimentDataLoader(
-                self.dataset_dict[split], batch_size=batch_size, shuffle=True
+                self.dataset_dict[split], batch_size=batch_size
             )
         return dataloaders
 
@@ -197,7 +216,9 @@ class HFData(ExperimentData):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = tokenize_and_concatenate(
-                self.dataset_dict[split], self.model.tokenizer  # type: ignore
+                self.dataset_dict[split],
+                self.model.tokenizer,  # type: ignore
+                max_length=self.model.cfg.n_ctx,
             )
 
     def _create_attention_mask(self, example: Dict):
@@ -213,11 +234,17 @@ class OWTData(HFData):
         cls,
         model: HookedTransformer,
         split: Optional[str] = None,
+        num_proc: int | None = None,
+        data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
         return cls.from_string(
             "stas/openwebtext-10k",
             model,
             split=split,
+            num_proc=num_proc,
+            data_files=data_files,
+            verbose=verbose,
         )
 
 
@@ -229,11 +256,17 @@ class PileFullData(HFData):
         cls,
         model: HookedTransformer,
         split: Optional[str] = None,
+        num_proc: int | None = None,
+        data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
         return cls.from_string(
             "monology/pile-uncopyrighted",
             model,
             split=split,
+            num_proc=num_proc,
+            data_files=data_files,
+            verbose=verbose,
         )
 
 
@@ -244,12 +277,18 @@ class PileSplittedData(HFData):
     def from_model(
         cls,
         model: HookedTransformer,
-        name: str,
+        name: Optional[str] = None,
         split: Optional[str] = None,
+        num_proc: int | None = None,
+        data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
         return cls.from_string(
             "ArmelR/the-pile-splitted",
             model,
             name=name,
             split=split,
+            num_proc=num_proc,
+            data_files=data_files,
+            verbose=verbose,
         )

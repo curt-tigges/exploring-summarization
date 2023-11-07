@@ -111,7 +111,7 @@ def get_layerwise_token_mean_activations(
     data_loader: ExperimentDataLoader,
     token_id: int,
     device: torch.device = DEFAULT_DEVICE,
-    cached: bool = True,
+    overwrite: bool = False,
 ) -> Float[Tensor, "layer d_model"]:
     """Get the mean value of a particular token id across a dataset for each layer of a model
 
@@ -130,7 +130,7 @@ def get_layerwise_token_mean_activations(
         token_id=token_id,
         extension="pt",
     )
-    if cached and file.exists():
+    if file.exists() and not overwrite:
         return torch.load(file.path)
 
     num_layers = model.cfg.n_layers
@@ -217,7 +217,7 @@ def compute_ablation_modified_metric(
     all_positions: bool = False,
     metric: Literal["logits", "loss"] = "logits",
     device: torch.device = DEFAULT_DEVICE,
-    cached: bool = True,
+    overwrite: bool = False,
 ) -> Float[Tensor, "experiment batch *pos"]:
     """
     Computes the change in metric (between two answers) when the activations of
@@ -269,7 +269,7 @@ def compute_ablation_modified_metric(
         frozen_attn_variant=frozen_attn_variant,
         extension="pt",
     )
-    if cached and file.exists():
+    if file.exists() and not overwrite:
         return torch.load(file.path)
     if layers_to_ablate == "all":
         layers_to_ablate = list(range(model.cfg.n_layers))
@@ -293,7 +293,7 @@ def compute_ablation_modified_metric(
         out_shape = (
             len(experiment_names),
             data_loader.dataset.num_rows,
-            model.cfg.n_ctx,
+            data_loader.dataset[0]["tokens"].shape[0],
         )
     output = torch.zeros(
         out_shape,

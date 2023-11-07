@@ -1,5 +1,5 @@
 from jaxtyping import Float, Int, Bool
-from typing import Dict, Iterable, List, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
 import torch
 from torch import Tensor
@@ -9,8 +9,10 @@ from datasets import load_dataset
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import tokenize_and_concatenate, get_act_name
 from circuitsvis.activations import text_neuron_activations
+from circuitsvis.topk_samples import topk_samples
 from IPython.display import display
-from utils.store import save_html
+from utils.cache import resid_names_filter
+from utils.store import ResultsFile
 
 
 # Harry Potter in English
@@ -67,39 +69,13 @@ poumons.
 """
 
 
-def get_dataloader(
-    model: HookedTransformer,
-    name: str = "stas/openwebtext-10k",
-    split: str = "train",
-    batch_size: int = 64,
-    shuffle: bool = False,
-    drop_last: bool = True,
-):
-    """Wrapper around HF's load_dataset to quickly get a dataloader"""
-    owt_data = load_dataset(name, split=split)
-    dataset = tokenize_and_concatenate(owt_data, model.tokenizer)
-    data_loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last
-    )
-    return data_loader
-
-
-def names_filter(name: str):
-    """Filter for the names of the activations we want to keep to study the resid stream."""
-    return name.endswith('resid_post') or name == get_act_name('resid_pre', 0)
-
-
 def get_projections_for_text(
     tokens: Int[Tensor, "batch pos"],
     special_dir: Float[Tensor, "d_model"],
     model: HookedTransformer,
-    device: str = "cpu",
 ) -> Float[Tensor, "batch pos layer"]:
     """Computes residual stream projections across all layers and positions for a given text."""
-    _, cache = model.run_with_cache(
-        tokens, 
-        names_filter=names_filter
-    )
+    _, cache = model.run_with_cache(tokens, names_filter=resid_names_filter)
     acts_by_layer = []
     for layer in range(-1, model.cfg.n_layers):
         if layer >= 0:
@@ -108,30 +84,44 @@ def get_projections_for_text(
             emb: Int[Tensor, "batch pos d_model"] = cache["resid_pre", 0]
         emb /= emb.norm(dim=-1, keepdim=True)
         act: Float[Tensor, "batch pos"] = einops.einsum(
-            emb, special_dir,
-            "batch pos d_model, d_model -> batch pos"
-        ).to(device=device)
+            emb, special_dir, "batch pos d_model, d_model -> batch pos"
+        ).cpu()
         acts_by_layer.append(act)
-    acts_by_layer: Float[Tensor, "batch pos layer"] = torch.stack(acts_by_layer, dim=2)
-    return acts_by_layer
+    return torch.stack(acts_by_layer, dim=2)
 
 
-def plot_neuroscope(
-    text: Union[str, List[str]], 
+def get_activations_from_direction(
+    tokens: Int[Tensor, "1 pos"],
+    special_dir: Float[Tensor, "d_model"],
     model: HookedTransformer,
-    centred: bool, 
-    activations: Float[Tensor, "pos layer 1"] = None,
-    special_dir: Float[Tensor, "d_model"] = None,
+) -> Float[Tensor, "pos layer 1"]:
+    projections: Float[Tensor, "1 pos layer"] = get_projections_for_text(
+        tokens, special_dir=special_dir, model=model
+    )
+    activations = einops.rearrange(projections, "1 pos layer -> pos layer 1")
+    return activations
+
+
+def plot_activations(
+    text: Union[str, List[str]],
+    model: HookedTransformer,
+    centered: bool,
+    activations: Optional[Float[Tensor, "pos ..."]] = None,
+    special_dir: Optional[Float[Tensor, "d_model"]] = None,
     verbose=False,
+    first_dimension_name: Optional[str] = None,
+    second_dimension_name: Optional[str] = None,
+    first_dimension_labels: Optional[List[str]] = None,
+    second_dimension_labels: Optional[List[str]] = None,
+    show_selectors: bool = True,
 ):
     """
     Wrapper around CircuitVis's `text_neuron_activations`.
-    Performs centring if `centred` is True.
+    Performs centering if `centered` is True.
     Computes activations based on projecting onto a resid stream direction if not provided.
-    If you don't need centring or projection, use `text_neuron_activations` directly.
     """
     assert activations is not None or special_dir is not None
-    tokens: Int[Tensor, "batch pos"] = model.to_tokens(text)
+    tokens: Int[Tensor, "1 pos"] = model.to_tokens(text)
     if isinstance(text, str):
         str_tokens = model.to_str_tokens(tokens, prepend_bos=False)
     else:
@@ -139,21 +129,25 @@ def plot_neuroscope(
     if verbose:
         print(f"Tokens shape: {tokens.shape}")
     if activations is None:
+        assert special_dir is not None
         if verbose:
             print("Computing activations")
-        activations: Float[Tensor, "batch pos layer"] = get_projections_for_text(
+        activations = get_activations_from_direction(
             tokens, special_dir=special_dir, model=model
         )
-        activations: Float[Tensor, "pos layer 1"] = einops.rearrange(
-            activations, "batch pos layer -> pos layer batch"
-        )
-        if verbose:
-            print(f"Activations shape: {activations.shape}")
-    if centred:
+    else:
+        activations = add_layer_neuron_dims(activations)
+    if verbose:
+        print(f"Activations shape: {activations.shape}")
+    if centered:
         if verbose:
             print("Centering activations")
-        layer_means = einops.reduce(activations, "pos layer 1 -> 1 layer 1", reduction="mean")
-        layer_means = einops.repeat(layer_means, "1 layer 1 -> pos layer 1", pos=activations.shape[0])
+        layer_means = einops.reduce(
+            activations, "pos layer neuron -> 1 layer neuron", reduction="mean"
+        )
+        layer_means = einops.repeat(
+            layer_means, "1 layer neuron -> pos layer neuron", pos=activations.shape[0]
+        )
         activations -= layer_means
     elif verbose:
         print("Activations already centered")
@@ -165,73 +159,112 @@ def plot_neuroscope(
         f"tokens={len(str_tokens)} and acts={activations.shape[0]}, "
         f"tokens={str_tokens}, "
         f"activations={activations.shape}"
-
     )
+    if second_dimension_name is None and activations.shape[-1] == 1:
+        second_dimension_name = "Model"
+        second_dimension_labels = [model.cfg.model_name]
     return text_neuron_activations(
-        tokens=str_tokens, 
+        tokens=str_tokens,
         activations=activations,
-        first_dimension_name="Layer (resid_pre)",
-        second_dimension_name="Model",
-        second_dimension_labels=[model.cfg.model_name],
+        first_dimension_name=first_dimension_name,
+        first_dimension_labels=first_dimension_labels,
+        second_dimension_name=second_dimension_name,
+        second_dimension_labels=second_dimension_labels,
+        show_selectors=show_selectors,
     )
 
 
 def get_window(
-    batch: int, 
-    pos: int, 
+    batch: int,
+    pos: int,
     dataloader: torch.utils.data.DataLoader,
     window_size: int = 10,
 ) -> Tuple[int, int]:
     """Helper function to get the window around a position in a batch (used in topk plotting))"""
     lb = max(0, pos - window_size)
-    ub = min(len(dataloader.dataset[batch]['tokens']), pos + window_size)
+    ub = min(len(dataloader.dataset[batch]["tokens"]), pos + window_size + 1)
     return lb, ub
 
 
 def extract_text_window(
-    batch: int, 
-    pos: int, 
+    batch: int,
+    pos: int,
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
-    window_size: int = 10
+    window_size: int = 10,
 ) -> List[str]:
     """Helper function to get the text window around a position in a batch (used in topk plotting)"""
+    assert model.tokenizer is not None
+    expected_size = 2 * window_size + 1
     lb, ub = get_window(batch, pos, dataloader=dataloader, window_size=window_size)
-    tokens = dataloader.dataset[batch]['tokens'][lb:ub]
+    tokens = dataloader.dataset[batch]["tokens"][lb:ub]
     str_tokens = model.to_str_tokens(tokens, prepend_bos=False)
-    return str_tokens
+    padding_to_add = expected_size - len(str_tokens)
+    if padding_to_add > 0 and model.tokenizer.padding_side == "right":
+        str_tokens += [model.tokenizer.bos_token] * padding_to_add
+    elif padding_to_add > 0 and model.tokenizer.padding_side == "left":
+        str_tokens = [model.tokenizer.bos_token] * padding_to_add + str_tokens
+    assert len(str_tokens) == expected_size, (
+        f"Expected text window of size {expected_size}, "
+        f"found {len(str_tokens)}: {str_tokens}"
+    )
+    return str_tokens  # type: ignore
 
 
 def extract_activations_window(
-    activations: Float[Tensor, "row pos layer"], 
-    batch: int, pos: int, 
+    activations: Float[Tensor, "row pos ..."],
+    batch: int,
+    pos: int,
+    model: HookedTransformer,
     dataloader: torch.utils.data.DataLoader,
     window_size: int = 10,
-) -> Float[Tensor, "pos layer"]:
+) -> Float[Tensor, "pos ..."]:
     """Helper function to get the activations window around a position in a batch (used in topk plotting)"""
+    assert model.tokenizer is not None
+    expected_size = 2 * window_size + 1
     lb, ub = get_window(batch, pos, dataloader=dataloader, window_size=window_size)
-    return activations[batch, lb:ub, :]
+    acts_window: Float[Tensor, "pos ..."] = activations[batch, lb:ub]
+    padding_to_add = expected_size - len(acts_window)
+    if padding_to_add > 0:
+        padding_shape = [padding_to_add] + list(acts_window.shape[1:])
+        padding_tensor = torch.zeros(
+            padding_shape, dtype=acts_window.dtype, device=acts_window.device
+        )
+        if model.tokenizer.padding_side == "right":
+            acts_window = torch.cat([acts_window, padding_tensor], dim=0)
+        elif model.tokenizer.padding_side == "left":
+            acts_window = torch.cat([padding_tensor, acts_window], dim=0)
+    assert len(acts_window) == expected_size, (
+        f"Expected activations window of size {expected_size}, "
+        f"found {len(acts_window)}: {acts_window}"
+    )
+    return acts_window
 
 
 def get_batch_pos_mask(
-    tokens: Union[str, List[str], Tensor], 
+    tokens: Union[str, List[str], Tensor],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
-    activations: Float[Tensor, "row pos"] = None,
-    device: str = None,
+    activations: Optional[Float[Tensor, "row pos ..."]] = None,
+    device: Optional[torch.device] = None,
 ):
     """Helper function to get a mask for inclusions/exclusions (used in topk plotting)"""
     if device is None and activations is not None:
         device = activations.device
     elif device is None:
-        device = model.cfg.device
+        assert model.cfg.device is not None
+        device = torch.device(model.cfg.device)
     mask_values: Int[Tensor, "words"] = torch.unique(
-        model.to_tokens(tokens, prepend_bos=False).flatten()
+        model.to_tokens(tokens, prepend_bos=False).flatten()  # type: ignore
     ).to(device)
     masks = []
-    for batch_idx, batch_value in enumerate(dataloader):
-        batch_tokens: Int[Tensor, "batch_size pos 1"] = batch_value['tokens'].to(device).unsqueeze(-1)
-        batch_mask: Bool[Tensor, "batch_size pos"] = torch.any(batch_tokens == mask_values, dim=-1)
+    for _, batch_value in enumerate(dataloader):
+        batch_tokens: Int[Tensor, "batch_size pos 1"] = (
+            batch_value["tokens"].to(device).unsqueeze(-1)
+        )
+        batch_mask: Bool[Tensor, "batch_size pos"] = torch.any(
+            batch_tokens == mask_values, dim=-1
+        )
         masks.append(batch_mask)
     mask: Bool[Tensor, "row pos"] = torch.cat(masks, dim=0)
     if activations is not None:
@@ -240,144 +273,268 @@ def get_batch_pos_mask(
     return mask
 
 
-def _plot_topk(
-    all_activations: Float[Tensor, "row pos layer"], 
+def remove_layer_neuron_dims(
+    all_activations: Float[Tensor, "row pos ..."],
+    layer: Optional[int] = None,
+    neuron: Optional[int] = None,
+    base_layer: Optional[int] = None,
+) -> Float[Tensor, "row pos"]:
+    """Helper function to remove layer and neuron dimensions from activations (used in topk plotting)"""
+    activations: Float[Tensor, "row pos"]
+    if all_activations.ndim == 4:
+        assert layer is not None
+        assert neuron is not None
+        activations = all_activations[:, :, layer, neuron]
+    elif all_activations.ndim == 3:
+        assert layer is not None
+        assert neuron is None
+        activations = all_activations[:, :, layer]
+        if base_layer is not None:
+            base_activations: Float[Tensor, "row pos"] = all_activations[
+                :, :, base_layer
+            ]
+            activations = activations - base_activations
+    elif all_activations.ndim == 2:
+        assert layer is None
+        assert neuron is None
+        activations = all_activations
+    else:
+        raise ValueError(
+            f"Activations must be of shape [batch x pos x layer x neuron], "
+            f"found {all_activations.shape}"
+        )
+    return activations
+
+
+def add_layer_neuron_dims(
+    activations: Float[Tensor, "..."],
+) -> Float[Tensor, "*row pos layer neuron"]:
+    if activations.ndim == 4:
+        return activations
+    elif activations.ndim == 3:
+        return activations.unsqueeze(-1)
+    elif activations.ndim <= 2:
+        return activations.unsqueeze(-1).unsqueeze(-1)
+    else:
+        raise ValueError(
+            f"Activations must be of shape [batch x pos x layer x neuron], "
+            f"found {activations.shape}"
+        )
+
+
+def mask_activations(
+    activations: Float[Tensor, "row pos ..."],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
-    layer: int = 0, 
-    k: int = 10, 
-    largest: bool = True,
-    window_size: int = 10, centred: bool = True, 
-    inclusions: Iterable[str] = None, exclusions: Iterable[str] = None,
-    verbose: bool = False, base_layer: int = None,
-):
-    """
-    One-sided topk plotting.
-    Main entrypoint should be `plot_topk`.
-    """
-    device = all_activations.device
+    device: torch.device,
+    k: int,
+    largest: bool,
+    inclusions: Optional[List[str]] = None,
+    exclusions: Optional[List[str]] = None,
+    verbose: bool = False,
+) -> Float[Tensor, "row pos ..."]:
     assert not (inclusions is not None and exclusions is not None)
-    label = "positive" if largest else "negative"
-    layers = all_activations.shape[-1]
-    if verbose:
-        print(f"Plotting top {k} {label} examples for layer {layer}")
-    activations: Float[Tensor, "row pos"] = all_activations[:, :, layer]
-    if base_layer is not None:
-        base_activations: Float[Tensor, "row pos"] = all_activations[:, :, base_layer]
-        activations = activations - base_activations
+
     if largest:
         ignore_value = torch.tensor(-np.inf, device=device, dtype=torch.float32)
     else:
         ignore_value = torch.tensor(np.inf, device=device, dtype=torch.float32)
     # create a mask for the inclusions/exclusions
     if exclusions is not None:
-        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(exclusions, dataloader, model, all_activations)
+        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(
+            exclusions, dataloader, model, activations
+        )
         masked_activations = activations.where(~mask, other=ignore_value)
     elif inclusions is not None:
-        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(inclusions, dataloader, model, all_activations)
-        assert mask.sum() >= k, (
-            f"Only {mask.sum()} positions match the inclusions, but {k} are required"
+        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(
+            inclusions, dataloader, model, activations
         )
+        assert (
+            mask.sum() >= k
+        ), f"Only {mask.sum()} positions match the inclusions, but {k} are required"
         if verbose:
             print(f"Including {mask.sum()} positions")
         masked_activations = activations.where(mask, other=ignore_value)
     else:
         masked_activations = activations
+    return masked_activations
+
+
+def plot_topk_onesided(
+    all_activations: Float[Tensor, "row pos ..."],
+    dataloader: torch.utils.data.DataLoader,
+    model: HookedTransformer,
+    layer: Optional[int] = None,
+    neuron: Optional[int] = None,
+    k: int = 10,
+    largest: bool = True,
+    window_size: int = 10,
+    centred: bool = True,
+    inclusions: Optional[List[str]] = None,
+    exclusions: Optional[List[str]] = None,
+    verbose: bool = False,
+    base_layer: Optional[int] = None,
+    local: bool = True,
+):
+    """
+    One-sided topk plotting.
+    Main entrypoint should be `plot_topk` for two-sided.
+    """
+    activations: Float[Tensor, "row pos"] = remove_layer_neuron_dims(
+        all_activations, layer=layer, neuron=neuron, base_layer=base_layer
+    )
+    device = activations.device
+    masked_activations = mask_activations(
+        activations,
+        dataloader=dataloader,
+        model=model,
+        device=device,
+        k=k,
+        largest=largest,
+        inclusions=inclusions,
+        exclusions=exclusions,
+        verbose=verbose,
+    )
+
+    # Get top k indices and values
     top_k_return = torch.topk(masked_activations.flatten(), k=k, largest=largest)
     assert torch.isfinite(top_k_return.values).all()
-    topk_pos_indices = top_k_return.indices
-    topk_pos_indices = np.array(np.unravel_index(
-        topk_pos_indices.cpu().numpy(), 
-        masked_activations.shape
-    )).T.tolist()
+    topk_indices = top_k_return.indices
+    topk_indices = np.array(
+        np.unravel_index(topk_indices.cpu().numpy(), masked_activations.shape)
+    ).T.tolist()
     # Get the examples and their activations corresponding to the most positive and negative activations
-    topk_pos_examples = [dataloader.dataset[b]['tokens'][s].item() for b, s in topk_pos_indices]
-    topk_pos_activations = [masked_activations[b, s].item() for b, s in topk_pos_indices]
-    # Print the  most positive and negative examples and their activations
-    print(f"Top {k} most {label} examples:")
-    zeros = torch.zeros((1, layers), device=device, dtype=torch.float32)
-    texts = [model.tokenizer.bos_token]
+    topk_tokens = [dataloader.dataset[b]["tokens"][s].item() for b, s in topk_indices]
+
+    # Construct nested list of texts and activations for plotting
+    assert model.tokenizer is not None
+    texts = []
     text_to_not_repeat = set()
-    acts = [zeros]
-    text_sep = "\n"
-    topk_zip = zip(topk_pos_indices, topk_pos_examples, topk_pos_activations)
-    for index, example, activation in topk_zip:
-        example_str = model.to_string(example)
+    acts_to_plot = torch.zeros(
+        (1, 1, k, window_size * 2 + 1),
+        dtype=torch.float32,
+    )
+    topk_zip = zip(topk_indices, topk_tokens)
+    for sample, (index, tokens) in enumerate(topk_zip):
+        example_str = model.to_string(tokens)
         if inclusions is not None:
-            assert example_str in inclusions, f"Example '{example_str}' not in inclusions {inclusions}"
+            assert (
+                example_str in inclusions
+            ), f"Example '{example_str}' not in inclusions {inclusions}"
         if exclusions is not None:
-            assert example_str not in exclusions, f"Example '{example_str}' in exclusions {exclusions}"
+            assert (
+                example_str not in exclusions
+            ), f"Example '{example_str}' in exclusions {exclusions}"
         batch, pos = index
         text_window: List[str] = extract_text_window(
             batch, pos, dataloader=dataloader, model=model, window_size=window_size
         )
-        activation_window: Float[Tensor, "pos layer"] = extract_activations_window(
-            all_activations, batch, pos, window_size=window_size, dataloader=dataloader
-        )
-        assert len(text_window) == activation_window.shape[0], (
-            f"Initially text window length {len(text_window)} does not match "
-            f"activation window length {activation_window.shape[0]}"
+        activation_window: Float[Tensor, "pos"] = extract_activations_window(
+            activations,
+            batch,
+            pos,
+            window_size=window_size,
+            model=model,
+            dataloader=dataloader,
         )
         text_flat = "".join(text_window)
         if text_flat in text_to_not_repeat:
             continue
         text_to_not_repeat.add(text_flat)
-        print(f"Example: {model.to_string(example)}, Activation: {activation:.4f}, Batch: {batch}, Pos: {pos}")
-        text_window.append(text_sep)
-        activation_window = torch.cat([activation_window, zeros], dim=0)
-        assert len(text_window) == activation_window.shape[0]
-        texts += text_window
-        acts.append(activation_window)
-    acts_cat = einops.repeat(torch.cat(acts, dim=0), "pos layer -> pos layer 1")
-    assert acts_cat.shape[0] == len(texts)
-    html = plot_neuroscope(texts, model=model, centred=centred, activations=acts_cat, verbose=False)
-    layer_suffix = f"_layer_{layer}" if layer is not None else ""
-    exclusion_suffix = "_w_exclusions" if exclusions is not None else ""
-    inclusion_suffix = "_w_inclusions" if inclusions is not None else ""
-    base_layer_suffix = f"_base_layer_{base_layer}" if base_layer is not None else ""
-    suffices = layer_suffix + exclusion_suffix + inclusion_suffix + base_layer_suffix
-    file_name = f"top_{k}_most_{label}_sentiment{suffices}.html"
-    save_html(html, file_name, model)
-    display(html)
+        texts.append(text_window)
+        acts_to_plot[0, 0, sample, :] = activation_window
+    rendered_html = topk_samples(
+        tokens=[[texts]],  # convert texts from 2D to 4D
+        activations=acts_to_plot,
+        zeroth_dimension_name="Model",
+        zeroth_dimension_labels=[model.cfg.model_name],
+        first_dimension_name="Side",
+        first_dimension_labels=["Largest" if largest else "Smallest"],
+    )
+    html = rendered_html.local_src if local else rendered_html.cdn_src
+    file = ResultsFile(
+        "top_k",
+        model=model.cfg.model_name,
+        dataloader=dataloader,
+        layer=layer,
+        neuron=neuron,
+        k=k,
+        largest=largest,
+        window_size=window_size,
+        centred=centred,
+        inclusions=inclusions,
+        exclusions=exclusions,
+        base_layer=base_layer,
+        local=local,
+        extension="html",
+        result_type="plots",
+    )
+    with open(file.path, "w") as f:
+        f.write(html)
+    display(rendered_html)
 
 
 def plot_topk(
-    activations: Float[Tensor, "row pos layer"],
-    dataloader: torch.utils.data.DataLoader,
-    model: HookedTransformer, 
-    k: int = 10, layer: int = 0,
-    window_size: int = 10, centred: bool = True, 
-    inclusions: Iterable[str] = None, exclusions: Iterable[str] = None,
-    verbose: bool = False, base_layer: int = None,
-):
-   """
-   Main entrypoint for topk plotting. Plots both positive and negative examples.
-   Finds topk in a tensor of activations, matches them up against the text from the dataset, 
-   and plots them neuroscope-style.
-   """
-   _plot_topk(
-       activations, dataloader=dataloader, model=model,
-       layer=layer, k=k, largest=True, 
-       window_size=window_size, centred=centred, 
-       inclusions=inclusions, exclusions=exclusions, 
-       verbose=verbose, base_layer=base_layer
-    )
-   _plot_topk(
-       activations, dataloader=dataloader, model=model,
-       layer=layer, k=k, largest=False, 
-       window_size=window_size, centred=centred, 
-       inclusions=inclusions, exclusions=exclusions, 
-       verbose=verbose, base_layer=base_layer
-    )
-   
-
-def _plot_top_p(
-    all_activations: Float[Tensor, "row pos layer"], 
+    activations: Float[Tensor, "row pos ..."],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
-    layer: int = 0, p: float = 0.1, k: int = 10, largest: bool = True,
-    window_size: int = 10, centred: bool = True, 
-    inclusions: Iterable[str] = None, exclusions: Iterable[str] = None,
+    k: int = 10,
+    layer: int = 0,
+    window_size: int = 10,
+    centred: bool = True,
+    inclusions: Optional[List[str]] = None,
+    exclusions: Optional[List[str]] = None,
+    verbose: bool = False,
+    base_layer: Optional[int] = None,
+):
+    """
+    Main entrypoint for topk plotting. Plots both positive and negative examples.
+    Finds topk in a tensor of activations, matches them up against the text from the dataset,
+    and plots them neuroscope-style.
+    """
+    plot_topk_onesided(
+        activations,
+        dataloader=dataloader,
+        model=model,
+        layer=layer,
+        k=k,
+        largest=True,
+        window_size=window_size,
+        centred=centred,
+        inclusions=inclusions,
+        exclusions=exclusions,
+        verbose=verbose,
+        base_layer=base_layer,
+    )
+    plot_topk_onesided(
+        activations,
+        dataloader=dataloader,
+        model=model,
+        layer=layer,
+        k=k,
+        largest=False,
+        window_size=window_size,
+        centred=centred,
+        inclusions=inclusions,
+        exclusions=exclusions,
+        verbose=verbose,
+        base_layer=base_layer,
+    )
+
+
+def _plot_top_p(
+    all_activations: Float[Tensor, "row pos layer"],
+    dataloader: torch.utils.data.DataLoader,
+    model: HookedTransformer,
+    layer: int = 0,
+    p: float = 0.1,
+    k: int = 10,
+    largest: bool = True,
+    window_size: int = 10,
+    centred: bool = True,
+    inclusions: Optional[List[str]] = None,
+    exclusions: Optional[List[str]] = None,
+    local: bool = True,
 ):
     """One-sided top-p plotting. Main entrypoint should be `plot_top_p`."""
     device = all_activations.device
@@ -390,10 +547,14 @@ def _plot_top_p(
         ignore_value = torch.tensor(np.inf, device=device, dtype=torch.float32)
     # create a mask for the inclusions/exclusions
     if exclusions is not None:
-        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(exclusions, dataloader, model, all_activations)
+        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(
+            exclusions, dataloader, model, all_activations
+        )
         masked_activations = activations.where(~mask, other=ignore_value)
     elif inclusions is not None:
-        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(inclusions, dataloader, model, all_activations)
+        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(
+            inclusions, dataloader, model, all_activations
+        )
         masked_activations = activations.where(mask, other=ignore_value)
     else:
         masked_activations = activations
@@ -402,14 +563,19 @@ def _plot_top_p(
     sample_size = int(p * len(activations_flat))
     top_p_indices = torch.topk(activations_flat, k=sample_size, largest=largest).indices
     sampled_indices = top_p_indices[torch.randperm(sample_size)[:k]]
-    top_p_indices = np.array(np.unravel_index(
-        sampled_indices.cpu().numpy(), masked_activations.shape
-    )).T.tolist()
-    top_p_examples = [dataloader.dataset[b]['tokens'][s].item() for b, s in top_p_indices]
+    top_p_indices = np.array(
+        np.unravel_index(sampled_indices.cpu().numpy(), masked_activations.shape)
+    ).T.tolist()
+    top_p_examples = [
+        dataloader.dataset[b]["tokens"][s].item() for b, s in top_p_indices
+    ]
     top_p_activations = [masked_activations[b, s].item() for b, s in top_p_indices]
     # Print the  most positive and negative examples and their activations
     print(f"Top {k} most {label} examples:")
-    zeros = torch.zeros((1, all_activations.shape[-1]), device=device, dtype=torch.float32)
+    zeros = torch.zeros(
+        (1, all_activations.shape[-1]), device=device, dtype=torch.float32
+    )
+    assert model.tokenizer is not None
     texts = [model.tokenizer.bos_token]
     text_to_not_repeat = set()
     acts = [zeros]
@@ -418,14 +584,15 @@ def _plot_top_p(
     for index, example, activation in topk_zip:
         batch, pos = index
         text_window: List[str] = extract_text_window(
-            batch, 
-            pos, 
-            dataloader=dataloader, 
-            model=model,
-            window_size=window_size
+            batch, pos, dataloader=dataloader, model=model, window_size=window_size
         )
         activation_window: Float[Tensor, "pos layer"] = extract_activations_window(
-            all_activations, batch, pos, window_size=window_size, dataloader=dataloader
+            all_activations,
+            batch,
+            pos,
+            window_size=window_size,
+            model=model,
+            dataloader=dataloader,
         )
         assert len(text_window) == activation_window.shape[0], (
             f"Initially text window length {len(text_window)} "
@@ -445,31 +612,70 @@ def _plot_top_p(
         acts.append(activation_window)
     acts_cat = einops.repeat(torch.cat(acts, dim=0), "pos layer -> pos layer 1")
     assert acts_cat.shape[0] == len(texts)
-    html = plot_neuroscope(texts, model=model, centred=centred, activations=acts_cat, verbose=False)
-    save_html(html, f"top_{p * 100:.0f}pc_most_{label}_layer_{layer}_sentiment.html", model)
+    rendered_html = plot_activations(
+        texts, model=model, centered=centred, activations=acts_cat, verbose=False
+    )
+    html = rendered_html.local_src if local else rendered_html.cdn_src
+    file = ResultsFile(
+        "top_p",
+        model=model,
+        dataloader=dataloader,
+        layer=layer,
+        p=p,
+        k=k,
+        largest=largest,
+        window_size=window_size,
+        centred=centred,
+        inclusions=inclusions,
+        exclusions=exclusions,
+        extension="html",
+        result_type="plots",
+    )
+    with open(file.path, "w") as f:
+        f.write(html)
     display(html)
 
 
 def plot_top_p(
-    activations: Float[Tensor, "row pos layer"], 
+    activations: Float[Tensor, "row pos layer"],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
-    k: int = 10, p: float = 0.1, layer: int = 0,
-    window_size: int = 10, centred: bool = True,  
-    inclusions: Iterable[str] = None, exclusions: Iterable[str] = None,
+    k: int = 10,
+    p: float = 0.1,
+    layer: int = 0,
+    window_size: int = 10,
+    centred: bool = True,
+    inclusions: Optional[List[str]] = None,
+    exclusions: Optional[List[str]] = None,
 ):
-   """
-   Main entrypoint for top-p plotting. Plots both positive and negative examples.
-   Samples k times from the top p% of activations, matches them up against the text from the dataset,
-   and plots them neuroscope-style.
-   """
-   _plot_top_p(
-       activations, dataloader=dataloader, model=model,
-       layer=layer, p=p, k=k, largest=True, window_size=window_size, centred=centred, 
-       inclusions=inclusions, exclusions=exclusions
+    """
+    Main entrypoint for top-p plotting. Plots both positive and negative examples.
+    Samples k times from the top p% of activations, matches them up against the text from the dataset,
+    and plots them neuroscope-style.
+    """
+    _plot_top_p(
+        activations,
+        dataloader=dataloader,
+        model=model,
+        layer=layer,
+        p=p,
+        k=k,
+        largest=True,
+        window_size=window_size,
+        centred=centred,
+        inclusions=inclusions,
+        exclusions=exclusions,
     )
-   _plot_top_p(
-       activations, dataloader=dataloader, model=model,
-       layer=layer, p=p, k=k, largest=False, window_size=window_size, centred=centred, 
-       inclusions=inclusions, exclusions=exclusions
+    _plot_top_p(
+        activations,
+        dataloader=dataloader,
+        model=model,
+        layer=layer,
+        p=p,
+        k=k,
+        largest=False,
+        window_size=window_size,
+        centred=centred,
+        inclusions=inclusions,
+        exclusions=exclusions,
     )

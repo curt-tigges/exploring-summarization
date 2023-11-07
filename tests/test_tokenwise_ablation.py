@@ -161,7 +161,7 @@ class TestTokenwise(unittest.TestCase):
             heads_to_freeze=list(heads_to_freeze),
             cached_means=cached_means,
             frozen_attn_variant=False,
-            cached=False,
+            overwrite=True,
         )
 
         self.assertEqual(metrics.shape[0], 2)
