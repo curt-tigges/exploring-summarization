@@ -113,13 +113,18 @@ class ExperimentData(ABC):
         split: str | None = None,
         num_proc: int | None = None,
         data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
         if data_files is not None:
             data_files = [
                 file_url.replace("blob", "resolve") for file_url in data_files
             ]
+        if verbose:
+            print(
+                f"load_dataset: path={path}, name={name}, split={split}, num_proc={num_proc}, data_files={data_files}"
+            )
         dataset_dict = load_dataset(
-            path, name, split=split, num_proc=num_proc, data_files=data_files
+            path=path, name=name, split=split, num_proc=num_proc, data_files=data_files
         )
         if split is not None:
             dataset_dict = DatasetDict(
@@ -224,6 +229,7 @@ class OWTData(HFData):
         split: Optional[str] = None,
         num_proc: int | None = None,
         data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
         return cls.from_string(
             "stas/openwebtext-10k",
@@ -231,6 +237,7 @@ class OWTData(HFData):
             split=split,
             num_proc=num_proc,
             data_files=data_files,
+            verbose=verbose,
         )
 
 
@@ -244,6 +251,7 @@ class PileFullData(HFData):
         split: Optional[str] = None,
         num_proc: int | None = None,
         data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
         return cls.from_string(
             "monology/pile-uncopyrighted",
@@ -251,6 +259,7 @@ class PileFullData(HFData):
             split=split,
             num_proc=num_proc,
             data_files=data_files,
+            verbose=verbose,
         )
 
 
@@ -261,10 +270,11 @@ class PileSplittedData(HFData):
     def from_model(
         cls,
         model: HookedTransformer,
-        name: str,
+        name: Optional[str] = None,
         split: Optional[str] = None,
         num_proc: int | None = None,
         data_files: List[str] | None = None,
+        verbose: bool = False,
     ):
         return cls.from_string(
             "ArmelR/the-pile-splitted",
@@ -273,4 +283,5 @@ class PileSplittedData(HFData):
             split=split,
             num_proc=num_proc,
             data_files=data_files,
+            verbose=verbose,
         )
