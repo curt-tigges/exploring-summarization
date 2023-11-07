@@ -293,7 +293,7 @@ def compute_ablation_modified_metric(
         out_shape = (
             len(experiment_names),
             data_loader.dataset.num_rows,
-            model.cfg.n_ctx,
+            data_loader.dataset[0]["tokens"].shape[0],
         )
     output = torch.zeros(
         out_shape,
