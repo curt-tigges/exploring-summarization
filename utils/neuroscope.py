@@ -160,7 +160,7 @@ def plot_activations(
         f"tokens={str_tokens}, "
         f"activations={activations.shape}"
     )
-    if second_dimension_name is None and activations.shape[3] == 1:
+    if second_dimension_name is None and activations.shape[-1] == 1:
         second_dimension_name = "Model"
         second_dimension_labels = [model.cfg.model_name]
     return text_neuron_activations(
