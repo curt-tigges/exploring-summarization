@@ -465,6 +465,7 @@ def plot_topk_onesided(
         inclusions=inclusions,
         exclusions=exclusions,
         base_layer=base_layer,
+        local=local,
         extension="html",
         result_type="plots",
     )
