@@ -112,8 +112,15 @@ class ExperimentData(ABC):
         name: str | None = None,
         split: str | None = None,
         num_proc: int | None = None,
+        data_files: List[str] | None = None,
     ):
-        dataset_dict = load_dataset(path, name, split=split, num_proc=num_proc)
+        if data_files is not None:
+            data_files = [
+                file_url.replace("blob", "resolve") for file_url in data_files
+            ]
+        dataset_dict = load_dataset(
+            path, name, split=split, num_proc=num_proc, data_files=data_files
+        )
         if split is not None:
             dataset_dict = DatasetDict(
                 {
@@ -215,11 +222,15 @@ class OWTData(HFData):
         cls,
         model: HookedTransformer,
         split: Optional[str] = None,
+        num_proc: int | None = None,
+        data_files: List[str] | None = None,
     ):
         return cls.from_string(
             "stas/openwebtext-10k",
             model,
             split=split,
+            num_proc=num_proc,
+            data_files=data_files,
         )
 
 
@@ -231,11 +242,15 @@ class PileFullData(HFData):
         cls,
         model: HookedTransformer,
         split: Optional[str] = None,
+        num_proc: int | None = None,
+        data_files: List[str] | None = None,
     ):
         return cls.from_string(
             "monology/pile-uncopyrighted",
             model,
             split=split,
+            num_proc=num_proc,
+            data_files=data_files,
         )
 
 
@@ -248,10 +263,14 @@ class PileSplittedData(HFData):
         model: HookedTransformer,
         name: str,
         split: Optional[str] = None,
+        num_proc: int | None = None,
+        data_files: List[str] | None = None,
     ):
         return cls.from_string(
             "ArmelR/the-pile-splitted",
             model,
             name=name,
             split=split,
+            num_proc=num_proc,
+            data_files=data_files,
         )
