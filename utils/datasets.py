@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import einops
 from functools import partial
+import re
 import torch
 import datasets
 from torch import Tensor
@@ -76,8 +77,14 @@ class ExperimentDataLoader(DataLoader):
         )
         if dataset.builder_name is not None:
             self._name = dataset.builder_name
-        else:
+        elif dataset.info.homepage:
             self._name = dataset.info.homepage.split("/")[-2]
+        else:
+            pattern = r"/huggingface/datasets/([^/]+/[^-]+)"
+            # Performing the regex search
+            match = re.search(pattern, dataset.cache_files[0]["filename"])
+            assert match
+            self._name = match.group(1)
         self._name += f"_{dataset.split}"
 
     @property
