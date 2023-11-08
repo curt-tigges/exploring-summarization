@@ -190,7 +190,7 @@ class ExperimentData(ABC):
             data_files = [
                 file_url.replace("blob", "resolve") for file_url in data_files
             ]
-            data_name = data_files[0].split("/")[-2]
+            data_name = data_files[0].split("/")[-3]
             if name is None:
                 name = data_name
             assert (
