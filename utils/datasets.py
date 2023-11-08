@@ -181,7 +181,7 @@ def mask_positions(
     return mask
 
 
-DEFAULT_EXCLUDE_CHARACTERS = [
+DEFAULT_EXCLUDE_REGEX = [
     "]",
     "[",
     "(",
@@ -189,23 +189,29 @@ DEFAULT_EXCLUDE_CHARACTERS = [
     ",",
     ":",
     ";",
-    "``",
-    "''",
+    "`",
+    "'",
     ".",
     "!",
     "?",
     "“",
+    "{",
+    "}",
+    "\\",
+    "/",
+    "^g$",
+    "[0-9]",
 ]
 
 
 def construct_exclude_list(
     model: HookedTransformer,
-    characters: List[str] = DEFAULT_EXCLUDE_CHARACTERS,
+    regex: List[str] = DEFAULT_EXCLUDE_REGEX,
 ) -> List[int]:
     assert model.tokenizer is not None
     exclude_list = []
     for vocab_str, token_id in model.tokenizer.vocab.items():
-        if any([p in vocab_str for p in characters]):
+        if any([re.search(p, vocab_str) for p in regex]):
             exclude_list.append(token_id)
     return exclude_list
 
@@ -214,14 +220,18 @@ def mask_positions(
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
     exclude_following_token: Optional[int] = None,
-    exclude_characters: Optional[List[str]] = None,
+    exclude_regex: Optional[List[str]] = None,
 ) -> Float[Tensor, "row pos ..."]:
-    """Returns a mask of the same shape as the dataset, with True values at positions to be excluded."""
+    """
+    Returns a mask of the same shape as the dataset, with True values at positions to be excluded.
+    TODO:
+        - Add option to change number of following positions to mask
+    """
     num_rows = dataloader.dataset.num_rows
     seq_len = dataloader.dataset[0]["tokens"].shape[0]
     mask = torch.ones((num_rows, seq_len), dtype=torch.bool)
-    if exclude_characters is not None:
-        exclude_list = construct_exclude_list(model, exclude_characters)
+    if exclude_regex is not None:
+        exclude_list = construct_exclude_list(model, exclude_regex)
         exclude_pt = torch.tensor(exclude_list, device=mask.device)
     else:
         exclude_pt = None
