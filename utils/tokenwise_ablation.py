@@ -111,7 +111,7 @@ def get_layerwise_token_mean_activations(
     data_loader: ExperimentDataLoader,
     token_id: int,
     device: torch.device = DEFAULT_DEVICE,
-    overwrite: bool = False,
+    cached: bool = True,
 ) -> Float[Tensor, "layer d_model"]:
     """Get the mean value of a particular token id across a dataset for each layer of a model
 
@@ -130,7 +130,7 @@ def get_layerwise_token_mean_activations(
         token_id=token_id,
         extension="pt",
     )
-    if not overwrite and file.exists():
+    if cached and file.exists():
         return torch.load(file.path)
 
     num_layers = model.cfg.n_layers
@@ -196,8 +196,8 @@ def compute_ablation_modified_loss(
     multiplier=1.0,
     all_positions: bool = False,
     device: torch.device = DEFAULT_DEVICE,
-    overwrite: bool = False,
-) -> Float[Tensor, "experiment batch pos"]:
+    cached: bool = True,
+) -> Float[Tensor, "experiment batch *pos"]:
     """
     Computes the change in loss when the activations of
     a particular token are mean-ablated.
@@ -242,7 +242,7 @@ def compute_ablation_modified_loss(
         all_positions=all_positions,
         extension="pt",
     )
-    if not overwrite and file.exists():
+    if cached and file.exists():
         return torch.load(file.path)
     if layers_to_ablate == "all":
         layers_to_ablate = list(range(model.cfg.n_layers))
@@ -253,11 +253,15 @@ def compute_ablation_modified_loss(
     # get length of prompts in dataset
     item_len = len(data_loader.dataset[0]["tokens"])
     experiment_index = {name: i for i, name in enumerate(experiment_names)}
-    out_shape = (
-        len(experiment_names),
-        data_loader.dataset.num_rows,
-        item_len,
-    )
+    if metric == "logits":
+        out_shape = (len(experiment_names), data_loader.dataset.num_rows)
+    else:
+        assert metric == "loss"
+        out_shape = (
+            len(experiment_names),
+            data_loader.dataset.num_rows,
+            model.cfg.n_ctx,
+        )
     output = torch.zeros(
         out_shape,
         device="cpu",
@@ -484,10 +488,145 @@ def compute_ablation_modified_logit_diff(
                 )
                 freeze_ablated_metric = hooked_loss - orig_metric
 
+            output[
+                experiment_index["freeze_ablated"],
+                batch_idx * batch_size : (batch_idx + 1) * batch_size,
+            ] = freeze_ablated_metric.cpu()
+            model.reset_hooks()
+
+    torch.save(output, file.path)
+    return output
+
+def compute_ablation_modified_loss(
+        model: HookedTransformer,
+        data_loader: ExperimentDataLoader,
+        layers_to_ablate: List[int] | Literal["all"] = "all",
+        cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
+        direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
+        multiplier=1.0,
+        all_positions: bool = False,
+        device: torch.device = DEFAULT_DEVICE,
+        cached: bool = True,
+) -> Float[Tensor, "experiment batch *pos"]:
+    """
+    Computes the change in loss when the activations of
+    a particular token are mean-ablated.
+
+    If cached_means is specified, then we ablate the full residual stream at every layer.
+    if direction_vectors is specified, then we only mean-ablate those directions.
+
+    Args:
+        model: HookedTransformer model
+        data_loader: ExperimentDataLoader for the dataset
+        layers_to_ablate: List of layers to ablate
+        cached_means:
+            List of tensors of shape (layer, d_model)
+            containing the mean value of a given token for each layer
+        direction_vectors:
+            List of tensors of shape (layer, d_model)
+            containing the direction vector for each layer
+        multiplier:
+            Multiplier for the direction vector
+        all_positions:
+            If True, ablate all positions in the sequence.
+            Otherwise, only ablate the positions specified in the data loader.
+        device:
+            Device to run the experiment on
+
+    Returns:
+        output: Tensor of shape (num_experiments, batch_size, sequence_length)
+    """
+    assert cached_means is not None or direction_vectors is not None
+    file = ResultsFile(
+        "ablation_modified_loss",
+        model_name=model.cfg.model_name,
+        dataset=data_loader.name,
+        layers_to_ablate=layers_to_ablate,
+        direction_vectors=direction_vectors,
+        multiplier=multiplier,
+        all_positions=all_positions,
+        extension="pt",
+    )
+    if cached and file.exists():
+        return torch.load(file.path)
+    if layers_to_ablate == "all":
+        layers_to_ablate = list(range(model.cfg.n_layers))
+    experiment_names = [
+        "orig",
+        "ablated",
+    ]
+    # get length of prompts in dataset
+    item_len = len(data_loader.dataset[0]["tokens"])
+    experiment_index = {name: i for i, name in enumerate(experiment_names)}
+    out_shape = (
+        len(experiment_names),
+        data_loader.dataset.num_rows,
+        item_len,
+    )
+    output = torch.zeros(
+        out_shape,
+        device="cpu",
+        dtype=torch.float32,
+    )
+    batch_size = data_loader.batch_size
+    assert batch_size is not None
+    for batch_idx, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
+        batch_tokens = batch_value["tokens"].to(device)
+        if all_positions:
+            batch_pos = batch_value["attention_mask"].to(device)
+        else:
+            batch_pos = batch_value["positions"].to(device)
+
+        # Step 1: original metric without hooks
+
+        # get the loss for each token in the batch
+        orig_loss = model(
+            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
+        )
+        assert isinstance(orig_loss, Tensor)
+        # concatenate column of 0s
+        orig_metric = torch.cat(
+            [torch.zeros((orig_loss.shape[0], 1)).to(device), orig_loss], dim=1
+        )
+        output[
+            experiment_index["orig"],
+            batch_idx * batch_size : (batch_idx + 1) *
+            batch_size,
+        ] = orig_metric.cpu()
+
+        # Step 2: repeat with tokens ablated
+
+        for layer in layers_to_ablate:
+            hook = partial(
+                ablation_hook_base,
+                cached_means=cached_means,
+                direction_vectors=direction_vectors,
+                multiplier=multiplier,
+                pos_mask=batch_pos,
+                layer=layer,
+            )
+            model.blocks[layer].hook_resid_post.add_hook(hook)
+
+        # get the loss for each token when run with hooks
+        hooked_loss = model(
+            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
+        )
+        # concatenate column of 0s
+        hooked_loss = torch.cat(
+            [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
+        )
+        loss_diff = hooked_loss - orig_metric
+        ablated_metric = mask_loss_at_next_positions(
+            loss_diff,
+            positions=batch_pos,
+            attention_mask=batch_value["attention_mask"],
+        )
+
         output[
             experiment_index["ablated"],
             batch_idx * batch_size : (batch_idx + 1) * batch_size,
         ] = ablated_metric.cpu()
+
         model.reset_hooks()
 
     torch.save(output, file.path)
