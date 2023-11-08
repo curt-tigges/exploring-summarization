@@ -241,9 +241,22 @@ class ExperimentData(ABC):
         self, example: dict, exclude_characters: List[str] = DEFAULT_EXCLUDE_CHARACTERS
     ) -> dict:
         tokens = example["tokens"]
+        positions = example["positions"]
+        attention_mask = example["attention_mask"]
         exclude_list = construct_exclude_list(self.model, exclude_characters)
         exclude_pt = torch.tensor(exclude_list, device=tokens.device)
         exclusions = torch.isin(tokens, exclude_pt)
+
+        # Exclude positions directly following token to ablate
+        shifted_positions = torch.roll(positions, shifts=1, dims=1)
+        shifted_positions[
+            :, 0
+        ] = 0  # Set the first column to zero because roll is circular
+        exclusions[shifted_positions == 1] = 1
+
+        # Exclude all masked positions
+        exclusions[attention_mask == 0] = 1
+
         return {"exclusions": exclusions}
 
     @staticmethod
