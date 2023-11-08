@@ -370,9 +370,6 @@ def plot_topk_onesided(
     largest: bool = True,
     window_size: int = 10,
     centred: bool = True,
-    inclusions: Optional[List[str]] = None,
-    exclusions: Optional[List[str]] = None,
-    verbose: bool = False,
     base_layer: Optional[int] = None,
     local: bool = True,
 ):
@@ -384,24 +381,13 @@ def plot_topk_onesided(
         all_activations, layer=layer, neuron=neuron, base_layer=base_layer
     )
     device = activations.device
-    masked_activations = mask_activations(
-        activations,
-        dataloader=dataloader,
-        model=model,
-        device=device,
-        k=k,
-        largest=largest,
-        inclusions=inclusions,
-        exclusions=exclusions,
-        verbose=verbose,
-    )
 
     # Get top k indices and values
-    top_k_return = torch.topk(masked_activations.flatten(), k=k, largest=largest)
+    top_k_return = torch.topk(activations.flatten(), k=k, largest=largest)
     assert torch.isfinite(top_k_return.values).all()
     topk_indices = top_k_return.indices
     topk_indices = np.array(
-        np.unravel_index(topk_indices.cpu().numpy(), masked_activations.shape)
+        np.unravel_index(topk_indices.cpu().numpy(), activations.shape)
     ).T.tolist()
     # Get the examples and their activations corresponding to the most positive and negative activations
     topk_tokens = [dataloader.dataset[b]["tokens"][s].item() for b, s in topk_indices]
@@ -417,14 +403,6 @@ def plot_topk_onesided(
     topk_zip = zip(topk_indices, topk_tokens)
     for sample, (index, tokens) in enumerate(topk_zip):
         example_str = model.to_string(tokens)
-        if inclusions is not None:
-            assert (
-                example_str in inclusions
-            ), f"Example '{example_str}' not in inclusions {inclusions}"
-        if exclusions is not None:
-            assert (
-                example_str not in exclusions
-            ), f"Example '{example_str}' in exclusions {exclusions}"
         batch, pos = index
         text_window: List[str] = extract_text_window(
             batch, pos, dataloader=dataloader, model=model, window_size=window_size
@@ -462,8 +440,6 @@ def plot_topk_onesided(
         largest=largest,
         window_size=window_size,
         centred=centred,
-        inclusions=inclusions,
-        exclusions=exclusions,
         base_layer=base_layer,
         local=local,
         extension="html",
@@ -482,8 +458,6 @@ def plot_topk(
     layer: int = 0,
     window_size: int = 10,
     centred: bool = True,
-    inclusions: Optional[List[str]] = None,
-    exclusions: Optional[List[str]] = None,
     verbose: bool = False,
     base_layer: Optional[int] = None,
 ):
@@ -501,9 +475,6 @@ def plot_topk(
         largest=True,
         window_size=window_size,
         centred=centred,
-        inclusions=inclusions,
-        exclusions=exclusions,
-        verbose=verbose,
         base_layer=base_layer,
     )
     plot_topk_onesided(
@@ -515,9 +486,6 @@ def plot_topk(
         largest=False,
         window_size=window_size,
         centred=centred,
-        inclusions=inclusions,
-        exclusions=exclusions,
-        verbose=verbose,
         base_layer=base_layer,
     )
 
