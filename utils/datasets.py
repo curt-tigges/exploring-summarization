@@ -25,6 +25,35 @@ from tqdm.notebook import tqdm
 import pandas as pd
 
 
+DEFAULT_EXCLUDE_CHARACTERS = [
+    "]",
+    "[",
+    "(",
+    ")",
+    ",",
+    ":",
+    ";",
+    "``",
+    "''",
+    ".",
+    "!",
+    "?",
+    "“",
+]
+
+
+def construct_exclude_list(
+    model: HookedTransformer,
+    characters: List[str] = DEFAULT_EXCLUDE_CHARACTERS,
+) -> List[int]:
+    assert model.tokenizer is not None
+    exclude_list = []
+    for vocab_str, token_id in model.tokenizer.vocab.items():
+        if any([p in vocab_str for p in characters]):
+            exclude_list.append(token_id)
+    return exclude_list
+
+
 class ExperimentDataLoader(DataLoader):
     COLUMN_NAMES = ["tokens", "attention_mask", "positions", "has_token"]
 
@@ -110,7 +139,6 @@ class ExperimentData(ABC):
         """
         self.dataset_dict = dataset_dict
         self.model = model
-        self.token_to_ablate = None
 
     @classmethod
     def from_string(
@@ -154,7 +182,11 @@ class ExperimentData(ABC):
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = self.dataset_dict[split].map(function, **kwargs)
 
-    def preprocess_datasets(self, token_to_ablate: Optional[int] = None):
+    def preprocess_datasets(
+        self,
+        token_to_ablate: Optional[int] = None,
+        exclude_characters: List[str] = DEFAULT_EXCLUDE_CHARACTERS,
+    ):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
         self._tokenize()
         self.apply_function(self._create_attention_mask)
@@ -164,6 +196,10 @@ class ExperimentData(ABC):
                 self._find_dataset_positions, token_to_ablate=token_to_ablate
             )
             self.apply_function(find_dataset_positions, batched=False)
+            find_exclusions = partial(
+                self._find_exclude_positions, exclude_characters=exclude_characters
+            )
+            self.apply_function(find_exclusions, batched=False)
 
         for split in self.dataset_dict.keys():
             if self.dataset_dict[split].split is None:
@@ -191,7 +227,7 @@ class ExperimentData(ABC):
         return self.dataset_dict
 
     @staticmethod
-    def _find_dataset_positions(example, token_to_ablate: int):
+    def _find_dataset_positions(example: dict, token_to_ablate: int) -> dict:
         # Create a tensor of zeros with the same shape as example['tokens']
         positions = torch.zeros_like(example["tokens"])
 
@@ -200,6 +236,15 @@ class ExperimentData(ABC):
         has_token = True if positions.sum() > 0 else False
 
         return {"positions": positions, "has_token": has_token}
+
+    def _find_exclude_positions(
+        self, example: dict, exclude_characters: List[str] = DEFAULT_EXCLUDE_CHARACTERS
+    ) -> dict:
+        tokens = example["tokens"]
+        exclude_list = construct_exclude_list(self.model, exclude_characters)
+        exclude_pt = torch.tensor(exclude_list, device=tokens.device)
+        exclusions = torch.isin(tokens, exclude_pt)
+        return {"exclusions": exclusions}
 
     @staticmethod
     @abstractmethod
