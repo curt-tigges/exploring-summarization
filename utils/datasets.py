@@ -218,7 +218,7 @@ def mask_positions(
 ) -> Float[Tensor, "row pos ..."]:
     """Returns a mask of the same shape as the dataset, with True values at positions to be excluded."""
     num_rows = dataloader.dataset.num_rows
-    seq_len = dataloader.dataset[0]["tokens"].shape[1]
+    seq_len = dataloader.dataset[0]["tokens"].shape[0]
     mask = torch.ones((num_rows, seq_len), dtype=torch.bool)
     if exclude_characters is not None:
         exclude_list = construct_exclude_list(model, exclude_characters)
