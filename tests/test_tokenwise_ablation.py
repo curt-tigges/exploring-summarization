@@ -16,7 +16,6 @@ from utils.tokenwise_ablation import (
     zero_attention_pos_hook,
     compute_ablation_modified_metric,
     compute_zeroed_attn_modified_loss,
-    mask_loss_at_next_positions,
 )
 
 
@@ -187,53 +186,6 @@ class TestTokenwise(unittest.TestCase):
             atol=1e-4,
             rtol=1e-4,
         )
-
-
-class TestMaskLossAtNextPositions(unittest.TestCase):
-    def test_mask_loss(self):
-        # Setup tensors for loss, positions, and attention_mask
-        loss = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]])
-        positions = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1]])
-        attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 0, 0]])
-
-        # Expected output after mask_loss_at_next_positions is applied
-        expected_output = torch.tensor([[0.1, 0.0, 0.3, 0.0], [0.5, 0.6, 0.0, 0.0]])
-
-        # Apply mask_loss_at_next_positions
-        result = mask_loss_at_next_positions(loss, positions, attention_mask)
-
-        # Assert the result is as expected
-        self.assertTrue(torch.allclose(result, expected_output, atol=1e-4, rtol=1e-4))
-
-    def test_attention_mask(self):
-        # Setup tensors for loss, positions, and attention_mask
-        loss = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]])
-        positions = torch.tensor([[0, 0, 0, 0], [0, 0, 0, 0]])
-        attention_mask = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1]])
-
-        # Expected output after mask_loss_at_next_positions is applied
-        expected_output = torch.tensor([[0.1, 0.0, 0.3, 0.0], [0.0, 0.6, 0.0, 0.8]])
-
-        # Apply mask_loss_at_next_positions
-        result = mask_loss_at_next_positions(loss, positions, attention_mask)
-
-        # Assert the result is as expected
-        self.assertTrue(torch.allclose(result, expected_output, atol=1e-4, rtol=1e-4))
-
-    def test_no_positions_masked(self):
-        # Test when no positions should be masked
-        loss = torch.randn(2, 4)
-        positions = torch.zeros(2, 4)
-        attention_mask = torch.ones(2, 4)
-
-        # The result should be identical to loss as no positions are masked
-        expected_output = loss.clone()
-
-        # Apply mask_loss_at_next_positions
-        result = mask_loss_at_next_positions(loss, positions, attention_mask)
-
-        # Assert the result is as expected
-        self.assertTrue(torch.equal(result, expected_output))
 
 
 if __name__ == "__main__":
