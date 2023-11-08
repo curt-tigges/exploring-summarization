@@ -218,7 +218,7 @@ def mask_positions(
 ) -> Float[Tensor, "row pos ..."]:
     """Returns a mask of the same shape as the dataset, with True values at positions to be excluded."""
     num_rows = dataloader.dataset.num_rows
-    seq_len = dataloader.dataset.seq_len
+    seq_len = dataloader.dataset[0]["tokens"].shape[1]
     mask = torch.ones((num_rows, seq_len), dtype=torch.bool)
     if exclude_characters is not None:
         exclude_list = construct_exclude_list(model, exclude_characters)
@@ -226,7 +226,7 @@ def mask_positions(
     else:
         exclude_pt = None
 
-    for batch_idx, batch in enumerate(dataloader):
+    for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
         batch_tokens: Int[Tensor, "batch_size pos"] = batch["tokens"]
         batch_start = batch_idx * dataloader.batch_size
         batch_end = batch_start + dataloader.batch_size
