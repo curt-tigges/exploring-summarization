@@ -282,7 +282,11 @@ class ExperimentData(ABC):
             data_files = [
                 file_url.replace("blob", "resolve") for file_url in data_files
             ]
+<<<<<<< HEAD
             data_name = data_files[0].split("/")[-3]
+=======
+            data_name = data_files[0].split("/")[-2]
+>>>>>>> 0cfa5e8 (Checked that file path name matches given name)
             if name is None:
                 name = data_name
             assert (
