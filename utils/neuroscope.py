@@ -383,21 +383,14 @@ def plot_top_onesided(
     activations: Float[Tensor, "row pos"] = remove_layer_neuron_dims(
         all_activations, layer=layer, neuron=neuron, base_layer=base_layer
     )
-    activations_flat: Float[Tensor, "(batch pos)"] = activations.flatten()
-    if p is not None:
-        # Take a random k from the top p% of activations
-        sample_size = int(p * len(activations_flat))
-        top_indices = torch.topk(
-            activations_flat, k=sample_size, largest=largest
-        ).indices
-        top_indices = top_indices[torch.randperm(sample_size)[:k]]
-    else:
-        # Take the top k overall activations
-        top_k_return = torch.topk(activations_flat, k=k, largest=largest)
-        assert torch.isfinite(top_k_return.values).all()
-        top_indices = top_k_return.indices
-    top_indices = np.array(
-        np.unravel_index(top_indices.cpu().numpy(), activations.shape)
+    device = activations.device
+
+    # Get top k indices and values
+    top_k_return = torch.topk(activations.flatten(), k=k, largest=largest)
+    assert torch.isfinite(top_k_return.values).all()
+    topk_indices = top_k_return.indices
+    topk_indices = np.array(
+        np.unravel_index(topk_indices.cpu().numpy(), activations.shape)
     ).T.tolist()
 
     # Construct nested list of texts and activations for plotting
@@ -409,22 +402,21 @@ def plot_top_onesided(
         (1, 1, k, seq_len),
         dtype=torch.float32,
     )
-    for sample, (batch, pos) in enumerate(top_indices):
-        if window_size is None:
-            text_window: List[str] = model.to_str_tokens(dataloader.dataset[batch]["tokens"])  # type: ignore
-            activation_window: Float[Tensor, "pos"] = activations[batch]
-        else:
-            text_window: List[str] = extract_text_window(
-                batch, pos, dataloader=dataloader, model=model, window_size=window_size
-            )
-            activation_window: Float[Tensor, "pos"] = extract_activations_window(
-                activations,
-                batch,
-                pos,
-                window_size=window_size,
-                model=model,
-                dataloader=dataloader,
-            )
+    topk_zip = zip(topk_indices, topk_tokens)
+    for sample, (index, tokens) in enumerate(topk_zip):
+        example_str = model.to_string(tokens)
+        batch, pos = index
+        text_window: List[str] = extract_text_window(
+            batch, pos, dataloader=dataloader, model=model, window_size=window_size
+        )
+        activation_window: Float[Tensor, "pos"] = extract_activations_window(
+            activations,
+            batch,
+            pos,
+            window_size=window_size,
+            model=model,
+            dataloader=dataloader,
+        )
         text_flat = "".join(text_window)
         if text_flat in text_to_not_repeat:
             continue
@@ -467,6 +459,7 @@ def plot_top_twosided(
     layer: int = 0,
     window_size: int = 10,
     centred: bool = True,
+    verbose: bool = False,
     base_layer: Optional[int] = None,
 ):
     """

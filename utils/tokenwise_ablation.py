@@ -267,7 +267,6 @@ def compute_ablation_modified_loss(
     assert batch_size is not None
     for batch_idx, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
-        batch_exclusions = batch_value["exclusions"].to(device)
         if all_positions:
             batch_pos = batch_value["attention_mask"].to(device)
         else:
@@ -340,7 +339,6 @@ def compute_ablation_modified_loss(
                 [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
             )
             ablated_metric = hooked_loss - orig_metric
-            ablated_metric[batch_exclusions] = 0
 
         output[
             experiment_index["ablated"],
@@ -485,7 +483,6 @@ def compute_ablation_modified_logit_diff(
                     dim=1,
                 )
                 freeze_ablated_metric = hooked_loss - orig_metric
-                freeze_ablated_metric[batch_exclusions] = 0
 
         output[
             experiment_index["ablated"],
