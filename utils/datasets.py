@@ -86,6 +86,7 @@ class ExperimentDataLoader(DataLoader):
             assert match
             self._name = match.group(1)
         self._name += f"_{dataset.split}"
+        self.seq_len = dataset[0]["tokens"].shape[0]
 
     @property
     def name(self):
@@ -126,6 +127,12 @@ class ExperimentData(ABC):
             data_files = [
                 file_url.replace("blob", "resolve") for file_url in data_files
             ]
+            data_name = data_files[0].split("/")[-2]
+            if name is None:
+                name = data_name
+            assert (
+                name == data_name
+            ), f"Name {name} does not match data name {data_name}"
         if verbose:
             print(
                 f"load_dataset: path={path}, name={name}, split={split}, num_proc={num_proc}, data_files={data_files}"
