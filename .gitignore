@@ -1,5 +1,6 @@
 .vscode/
 results/cache
+results/offline
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
