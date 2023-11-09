@@ -33,14 +33,7 @@ To upload images to a PR -- simply drag and drop an image while in edit mode and
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] I have not rewritten tests relating to key interfaces which would affect backward compatibility
-- [ ] My code follows the [Black](https://pypi.org/project/black/) format
-- [ ] I have minimised type warnings from [Pylance](https://marketplace.visualstudio.com/items?itemName=ms-python.vscode-pylance)
-- [ ] I have culled any redundant and unused code
-- [ ] I have cached results of slow operations in as flexible of a format as possible
-- [ ] Cache results are stored in a flat structure inside results/cache and the file name contains all necessary identifying information (such as model name and dataset used) to avoid accidental overwriting.
-- [ ] I have used intuitive abstractions, making clear the public entrypoints to a given class
-- [ ] Function and variable names are long enough to be descriptive
-
+- [ ] I have followed the style guide below
 
 <!--
 As you go through the checklist above, you can mark something as done by putting an x character in it
@@ -49,3 +42,13 @@ For example,
 - [x] I have done this task
 - [ ] I have not done this task
 -->
+
+# Style guide
+- My code follows the [Black](https://pypi.org/project/black/) format
+- I have minimised type warnings from [Pylance](https://marketplace.visualstudio.com/items?itemName=ms-python.vscode-pylance)
+- Cull any redundant and unused code
+- Cache results of slow operations in as flexible of a format as possible, in a flat structure inside results/cache and the file name contains all necessary identifying information (such as model name and dataset used) to avoid accidental overwriting.
+- Use intuitive abstractions, making clear the public entrypoints to a given class
+- Function and variable names should be long enough to be descriptive
+
+
