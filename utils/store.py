@@ -15,6 +15,9 @@ from datasets import dataset_dict
 from utils.datasets import ExperimentDataLoader
 
 
+ARGS_TO_INGORE = ["device", "batch_size", "overwrite"]
+
+
 def add_styling(html: str):
     # Extract the table ID from the HTML using regex
     table_id_match = re.search(r'<table id="([^"]+)">', html)
@@ -108,6 +111,8 @@ def args_to_file_name(**kwargs):
     for key, value in kwargs.items():
         if value is None or (hasattr(value, "__len__") and len(value) == 0):
             continue
+        elif key in ARGS_TO_INGORE:
+            continue
         elif isinstance(value, list) or isinstance(value, tuple):
             value = f"{len(value):d}"
         elif isinstance(value, bool):
@@ -167,6 +172,8 @@ class ResultsFile:
                 f.write(data)
         elif isinstance(data, torch.Tensor):
             torch.save(data, self.path)
+        elif isinstance(data, go.Figure):
+            data.write_html(self.path)
         else:
             raise ValueError(f"Unimplemented type for save: {type(data)}")
 
