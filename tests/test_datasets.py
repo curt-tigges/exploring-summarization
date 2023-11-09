@@ -16,14 +16,14 @@ class TestOWTData(unittest.TestCase):
         self.mocked_model.tokenizer = MagicMock()
         self.text_column = "text"
 
-    @patch("utils.datasets.tokenize_and_concatenate")
-    def test_tokenize(self, mocked_tokenize_and_concatenate):
+    @patch("utils.datasets.tokenize_truncate_concatenate")
+    def test_tokenize(self, mocked_tokenize_truncate_concatenate):
         outputs = {
             "train": MagicMock(),
             "validation": MagicMock(),
             "test": MagicMock(),
         }
-        mocked_tokenize_and_concatenate.side_effect = outputs.values()
+        mocked_tokenize_truncate_concatenate.side_effect = outputs.values()
         owt_data = OWTData(self.mocked_dataset, self.mocked_model)
 
         owt_data._tokenize()
