@@ -40,7 +40,7 @@ from IPython.display import HTML, display
 from utils.circuit_analysis import get_logit_diff
 
 from utils.tokenwise_ablation import (
-    compute_ablation_modified_metric,
+    compute_ablation_modified_loss,
     load_directions,
     get_random_directions,
     get_zeroed_dir_vector,
@@ -74,9 +74,17 @@ comma_mean_values = get_layerwise_token_mean_activations(
     model, data_loader, token_id=TOKEN_ID, device=device
 )
 # %%
+smaller_owt = OWTData.from_model(model)
+smaller_owt.dataset_dict[SPLIT] = smaller_owt.dataset_dict[SPLIT].select(
+    list(range(100))
+)
+smaller_owt.preprocess_datasets(token_to_ablate=TOKEN_ID)
+smaller_data_loader = smaller_owt.get_dataloaders(batch_size=BATCH_SIZE)[SPLIT]
+
+# %%
 losses = compute_ablation_modified_metric(
     model,
-    data_loader,
+    smaller_data_loader,
     cached_means=comma_mean_values,
     metric="loss",
     device=device,
