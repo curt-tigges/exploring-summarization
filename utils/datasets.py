@@ -26,25 +26,25 @@ import pandas as pd
 
 
 DEFAULT_EXCLUDE_REGEX = [
-    "]",
-    "[",
-    "(",
-    ")",
-    ",",
-    ":",
-    ";",
-    "`",
-    "'",
-    ".",
-    "!",
-    "?",
-    "“",
-    "{",
-    "}",
-    "\\",
-    "/",
-    "^g$",
-    "[0-9]",
+    r"\]",
+    r"\[",
+    r"\(",
+    r"\)",
+    r",",
+    r":",
+    r";",
+    r"`",
+    r"'",
+    r"\.",
+    r"!",
+    r"\?",
+    r"“",
+    r"{",
+    r"}",
+    r"\\",
+    r"/",
+    r"^g$",
+    r"[0-9]",
 ]
 
 
@@ -70,6 +70,7 @@ def mask_positions(
     Returns a mask of the same shape as the dataset, with True values at positions to be excluded.
     TODO:
         - Add option to change number of following positions to mask
+        - Unify list of regex to single string
     """
     num_rows = dataloader.dataset.num_rows
     seq_len = dataloader.dataset[0]["tokens"].shape[0]
