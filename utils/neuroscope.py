@@ -371,7 +371,6 @@ def plot_top_onesided(
     k: int = 10,
     p: Optional[float] = None,
     largest: bool = True,
-    window_size: Optional[int] = None,
     centred: bool = True,
     base_layer: Optional[int] = None,
     local: bool = True,
@@ -383,8 +382,6 @@ def plot_top_onesided(
     activations: Float[Tensor, "row pos"] = remove_layer_neuron_dims(
         all_activations, layer=layer, neuron=neuron, base_layer=base_layer
     )
-    device = activations.device
-
     # Get top k indices and values
     top_k_return = torch.topk(activations.flatten(), k=k, largest=largest)
     assert torch.isfinite(top_k_return.values).all()
@@ -399,24 +396,12 @@ def plot_top_onesided(
     text_to_not_repeat = set()
     seq_len = activations.shape[1] if window_size is None else window_size * 2 + 1
     acts_to_plot = torch.zeros(
-        (1, 1, k, seq_len),
+        (1, 1, k, activations.shape[1]),
         dtype=torch.float32,
     )
-    topk_zip = zip(topk_indices, topk_tokens)
-    for sample, (index, tokens) in enumerate(topk_zip):
-        example_str = model.to_string(tokens)
-        batch, pos = index
-        text_window: List[str] = extract_text_window(
-            batch, pos, dataloader=dataloader, model=model, window_size=window_size
-        )
-        activation_window: Float[Tensor, "pos"] = extract_activations_window(
-            activations,
-            batch,
-            pos,
-            window_size=window_size,
-            model=model,
-            dataloader=dataloader,
-        )
+    for sample, (batch, pos) in enumerate(topk_indices):
+        text_window: List[str] = model.to_str_tokens(dataloader.dataset[batch]["tokens"])  # type: ignore
+        activation_window: Float[Tensor, "pos"] = activations[batch]
         text_flat = "".join(text_window)
         if text_flat in text_to_not_repeat:
             continue
@@ -474,7 +459,6 @@ def plot_top_twosided(
         layer=layer,
         k=k,
         largest=True,
-        window_size=window_size,
         centred=centred,
         base_layer=base_layer,
     )
@@ -485,7 +469,6 @@ def plot_top_twosided(
         layer=layer,
         k=k,
         largest=False,
-        window_size=window_size,
         centred=centred,
         base_layer=base_layer,
     )
