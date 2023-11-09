@@ -14,7 +14,8 @@ from utils.tokenwise_ablation import (
     get_zeroed_dir_vector,
     get_layerwise_token_mean_activations,
     zero_attention_pos_hook,
-    compute_ablation_modified_metric,
+    compute_ablation_modified_logit_diff,
+    compute_ablation_modified_loss,
     compute_zeroed_attn_modified_loss,
 )
 
@@ -148,19 +149,14 @@ class TestTokenwise(unittest.TestCase):
         layers_to_ablate = [
             0,
         ]
-        heads_to_freeze = [
-            (0, 0),
-        ]
+        
         cached_means = torch.zeros((1, 512))
 
-        metrics = compute_ablation_modified_metric(
+        metrics = compute_ablation_modified_logit_diff(
             self.model,
             data_loader,
             layers_to_ablate=layers_to_ablate,
-            heads_to_freeze=list(heads_to_freeze),
             cached_means=cached_means,
-            frozen_attn_variant=False,
-            overwrite=True,
         )
 
         self.assertEqual(metrics.shape[0], 2)
