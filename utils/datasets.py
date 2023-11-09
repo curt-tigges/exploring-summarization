@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import einops
 from functools import partial
 import re
+import numpy as np
 import torch
 import datasets
 from torch import Tensor
@@ -12,17 +13,17 @@ from torch.utils.data import (
 from datasets import (
     load_dataset,
     DatasetDict,
-    Dataset as HFDataset,
+    Dataset,
 )
 from jaxtyping import Float, Int, Bool
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import (
     tokenize_and_concatenate,
+    keep_single_column,
+    AutoTokenizer,
 )
-from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
-import pandas as pd
 
 
 DEFAULT_EXCLUDE_REGEX = [
@@ -46,6 +47,86 @@ DEFAULT_EXCLUDE_REGEX = [
     r"^g$",
     r"[0-9]",
 ]
+
+
+def tokenize_truncate_concatenate(
+    dataset: Dataset,
+    tokenizer: AutoTokenizer,
+    streaming: bool = False,
+    max_length: int = 1024,
+    column_name: str = "text",
+    add_bos_token: bool = True,
+    num_proc: int = 10,
+    padding: bool = True,
+    truncation: bool = True,
+) -> Dataset:
+    """
+    Helper function to tokenize, truncate and concatenate a dataset of text.
+    This converts the text to tokens and truncates them to max_length (provided truncation=True).
+
+    Args:
+        dataset (Dataset): The dataset to tokenize, assumed to be a HuggingFace text dataset.
+        tokenizer (AutoTokenizer): The tokenizer. Assumed to have a bos_token_id and an eos_token_id.
+        streaming (bool, optional): Whether the dataset is being streamed. If True, avoids using parallelism. Defaults to False.
+        max_length (int, optional): The length of the context window of the sequence. Defaults to 1024.
+        column_name (str, optional): The name of the text column in the dataset. Defaults to 'text'.
+        add_bos_token (bool, optional): . Defaults to True.
+        num_proc (int, optional): The number of processes to use. Defaults to 10.
+        padding (bool, optional): Whether to pad the sequences. Defaults to True.
+        truncation (bool, optional): Whether to truncate the sequences. Defaults to True.
+
+    Returns:
+        Dataset: Returns the tokenized dataset, as a dataset of tensors, with a single column called "tokens"
+
+    Note: There is a bug when inputting very small datasets (eg, <1 batch per process) where it just outputs nothing. I'm not super sure why
+    """
+    if not truncation:
+        return tokenize_and_concatenate(
+            dataset,
+            tokenizer,
+            streaming=streaming,
+            max_length=max_length,
+            column_name=column_name,
+            add_bos_token=add_bos_token,
+            num_proc=num_proc,
+        )
+    dataset = keep_single_column(dataset, column_name)
+    if tokenizer.pad_token is None:
+        # We add a padding token, purely to implement the tokenizer. This will be removed before inputting tokens to the model, so we do not need to increment d_vocab in the model.
+        tokenizer.add_special_tokens({"pad_token": "<PAD>"})
+    # Define the length to chop things up into - leaving space for a bos_token if required
+    if add_bos_token:
+        seq_len = max_length - 1
+    else:
+        seq_len = max_length
+
+    def tokenize_function(
+        examples: Dict[str, List[str]],
+    ) -> Dict[str, Int[np.ndarray, "batch seq"]]:
+        text = examples[column_name]
+        # Tokenize the chunks in parallel. Uses NumPy because HuggingFace map doesn't want tensors returned
+        tokens: Int[np.ndarray, "batch seq"] = tokenizer(
+            text,
+            return_tensors="np",
+            padding=padding,
+            truncation=truncation,
+            max_length=seq_len,
+        )[  # type: ignore
+            "input_ids"
+        ]
+        if add_bos_token:
+            prefix = np.full((len(tokens), 1), tokenizer.bos_token_id)
+            tokens = np.concatenate([prefix, tokens], axis=1)
+        return {"tokens": tokens}
+
+    tokenized_dataset = dataset.map(
+        tokenize_function,
+        batched=True,
+        num_proc=(num_proc if not streaming else None),
+        remove_columns=[column_name],
+    )
+    tokenized_dataset.set_format(type="torch", columns=["tokens"])
+    return tokenized_dataset
 
 
 def construct_exclude_list(
@@ -105,7 +186,7 @@ class ExperimentDataLoader(DataLoader):
 
     def __init__(
         self,
-        dataset: HFDataset,
+        dataset: Dataset,
         batch_size: int | None = 1,
         shuffle: bool = False,
         sampler: Sampler | Iterable | None = None,
@@ -231,9 +312,10 @@ class ExperimentData(ABC):
     def preprocess_datasets(
         self,
         token_to_ablate: Optional[int] = None,
+        truncation: bool = True,
     ):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
-        self._tokenize()
+        self._tokenize(truncation=truncation)
         self.apply_function(self._create_attention_mask)
 
         if token_to_ablate is not None:
@@ -284,7 +366,7 @@ class ExperimentData(ABC):
         pass
 
     @abstractmethod
-    def _tokenize(self) -> None:
+    def _tokenize(self, truncation: bool = True) -> None:
         pass
 
 
@@ -296,13 +378,14 @@ class HFData(ExperimentData):
     ):
         super().__init__(dataset_dict, model)
 
-    def _tokenize(self):
+    def _tokenize(self, truncation: bool = True):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
         for split in self.dataset_dict.keys():
-            self.dataset_dict[split] = tokenize_and_concatenate(
+            self.dataset_dict[split] = tokenize_truncate_concatenate(
                 self.dataset_dict[split],
                 self.model.tokenizer,  # type: ignore
                 max_length=self.model.cfg.n_ctx,
+                truncation=truncation,
             )
 
     def _create_attention_mask(self, example: Dict):
