@@ -41,10 +41,14 @@ from utils.circuit_analysis import get_logit_diff
 
 from utils.tokenwise_ablation import (
 <<<<<<< HEAD
+<<<<<<< HEAD
     compute_ablation_modified_loss,
 =======
     compute_ablation_modified_metric,
 >>>>>>> 59a3578 (Started analyzing period ablations)
+=======
+    compute_ablation_modified_loss,
+>>>>>>> c1230bf (Removed reference to masking function in compute_ablation_modified_loss)
     load_directions,
     get_random_directions,
     get_zeroed_dir_vector,
@@ -83,6 +87,9 @@ comma_mean_values = get_layerwise_token_mean_activations(
 )
 # %%
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> c1230bf (Removed reference to masking function in compute_ablation_modified_loss)
 smaller_owt = OWTData.from_model(model)
 smaller_owt.dataset_dict[SPLIT] = smaller_owt.dataset_dict[SPLIT].select(
     list(range(100))
@@ -91,14 +98,17 @@ smaller_owt.preprocess_datasets(token_to_ablate=TOKEN_ID)
 smaller_data_loader = smaller_owt.get_dataloaders(batch_size=BATCH_SIZE)[SPLIT]
 
 # %%
+<<<<<<< HEAD
 losses = compute_ablation_modified_loss(
     model,
     smaller_data_loader,
     cached_means=comma_mean_values,
 =======
+=======
+>>>>>>> c1230bf (Removed reference to masking function in compute_ablation_modified_loss)
 losses = compute_ablation_modified_metric(
     model,
-    data_loader,
+    smaller_data_loader,
     cached_means=comma_mean_values,
     metric="loss",
 >>>>>>> 59a3578 (Started analyzing period ablations)
