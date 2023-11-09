@@ -184,26 +184,6 @@ def zero_attention_pos_hook(
     return pattern
 
 
-def mask_loss_at_next_positions(
-    loss: Float[Tensor, "batch seq_len"],
-    positions: Float[Tensor, "batch seq_len"],
-    attention_mask: Float[Tensor, "batch seq_len"],
-) -> Float[Tensor, "batch seq_len"]:
-    """
-    We want to ignore loss changes immediately following the token of interest.
-    """
-    shifted_batch_pos = torch.roll(positions, shifts=1, dims=1)
-    shifted_batch_pos[:, 0] = 0  # Set the first column to zero because roll is circular
-
-    # Zero out loss_diff positions
-    # Use the shifted_batch_pos tensor to mask loss_diff and set those positions to zero.
-    loss[shifted_batch_pos == 1] = 0
-
-    # set all masked positions to zero
-    loss[attention_mask == 0] = 0
-    return loss
-
-
 # -------------------- EXPERIMENTS --------------------
 def compute_ablation_modified_metric(
     model: HookedTransformer,
@@ -330,7 +310,7 @@ def compute_ablation_modified_metric(
                 batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
             )
             assert isinstance(orig_loss, Tensor)
-            # concatenate column of 0s
+            # concatenate column of 0s to keep the sequence length the same
             orig_metric = torch.cat(
                 [torch.zeros((orig_loss.shape[0], 1)).to(device), orig_loss], dim=1
             )
@@ -375,12 +355,7 @@ def compute_ablation_modified_metric(
             hooked_loss = torch.cat(
                 [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
             )
-            loss_diff = hooked_loss - orig_metric
-            ablated_metric = mask_loss_at_next_positions(
-                loss_diff,
-                positions=batch_pos,
-                attention_mask=batch_value["attention_mask"],
-            )
+            ablated_metric = hooked_loss - orig_metric
 
         output[
             experiment_index["ablated"],
@@ -435,12 +410,7 @@ def compute_ablation_modified_metric(
                     [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss],
                     dim=1,
                 )
-                loss_diff = hooked_loss - orig_metric
-                freeze_ablated_metric = mask_loss_at_next_positions(
-                    loss_diff,
-                    positions=batch_pos,
-                    attention_mask=batch_value["attention_mask"],
-                )
+                freeze_ablated_metric = hooked_loss - orig_metric
 
             output[
                 experiment_index["freeze_ablated"],

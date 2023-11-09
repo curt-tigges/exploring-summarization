@@ -25,6 +25,81 @@ from tqdm.notebook import tqdm
 import pandas as pd
 
 
+DEFAULT_EXCLUDE_REGEX = [
+    r"\]",
+    r"\[",
+    r"\(",
+    r"\)",
+    r",",
+    r":",
+    r";",
+    r"`",
+    r"'",
+    r"\.",
+    r"!",
+    r"\?",
+    r"“",
+    r"{",
+    r"}",
+    r"\\",
+    r"/",
+    r"^g$",
+    r"[0-9]",
+]
+
+
+def construct_exclude_list(
+    model: HookedTransformer,
+    regex: List[str] = DEFAULT_EXCLUDE_REGEX,
+) -> List[int]:
+    assert model.tokenizer is not None
+    exclude_list = []
+    for vocab_str, token_id in model.tokenizer.vocab.items():
+        if any([re.search(p, vocab_str) for p in regex]):
+            exclude_list.append(token_id)
+    return exclude_list
+
+
+def mask_positions(
+    dataloader: torch.utils.data.DataLoader,
+    model: HookedTransformer,
+    exclude_following_token: Optional[int] = None,
+    exclude_regex: Optional[List[str]] = None,
+) -> Float[Tensor, "row pos ..."]:
+    """
+    Returns a mask of the same shape as the dataset, with True values at positions to be excluded.
+    TODO:
+        - Add option to change number of following positions to mask
+        - Unify list of regex to single string
+    """
+    num_rows = dataloader.dataset.num_rows
+    seq_len = dataloader.dataset[0]["tokens"].shape[0]
+    mask = torch.ones((num_rows, seq_len), dtype=torch.bool)
+    if exclude_regex is not None:
+        exclude_list = construct_exclude_list(model, exclude_regex)
+        exclude_pt = torch.tensor(exclude_list, device=mask.device)
+    else:
+        exclude_pt = None
+
+    for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+        batch_tokens: Int[Tensor, "batch_size pos"] = batch["tokens"]
+        batch_start = batch_idx * dataloader.batch_size
+        batch_end = batch_start + dataloader.batch_size
+        batch_mask = torch.zeros_like(batch_tokens, dtype=torch.bool)
+        batch_mask[batch["attention_mask"] == 0] = 1
+        if exclude_pt is not None:
+            batch_mask[torch.isin(batch_tokens, exclude_pt)] = 1
+        if exclude_following_token is not None:
+            # Exclude positions directly following token to ablate
+            shifted_tokens = torch.roll(batch_tokens, shifts=1, dims=1)
+            shifted_tokens[
+                :, 0
+            ] = 0  # Set the first column to zero because roll is circular
+            batch_mask[shifted_tokens == exclude_following_token] = 1
+        mask[batch_start:batch_end] = batch_mask
+    return mask
+
+
 class ExperimentDataLoader(DataLoader):
     COLUMN_NAMES = ["tokens", "attention_mask", "positions", "has_token"]
 
@@ -86,6 +161,7 @@ class ExperimentDataLoader(DataLoader):
             assert match
             self._name = match.group(1)
         self._name += f"_{dataset.split}"
+        self.seq_len = dataset[0]["tokens"].shape[0]
 
     @property
     def name(self):
@@ -109,7 +185,6 @@ class ExperimentData(ABC):
         """
         self.dataset_dict = dataset_dict
         self.model = model
-        self.token_to_ablate = None
 
     @classmethod
     def from_string(
@@ -126,6 +201,12 @@ class ExperimentData(ABC):
             data_files = [
                 file_url.replace("blob", "resolve") for file_url in data_files
             ]
+            data_name = data_files[0].split("/")[-3]
+            if name is None:
+                name = data_name
+            assert (
+                name == data_name
+            ), f"Name {name} does not match data name {data_name}"
         if verbose:
             print(
                 f"load_dataset: path={path}, name={name}, split={split}, num_proc={num_proc}, data_files={data_files}"
@@ -147,7 +228,10 @@ class ExperimentData(ABC):
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = self.dataset_dict[split].map(function, **kwargs)
 
-    def preprocess_datasets(self, token_to_ablate: Optional[int] = None):
+    def preprocess_datasets(
+        self,
+        token_to_ablate: Optional[int] = None,
+    ):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
         self._tokenize()
         self.apply_function(self._create_attention_mask)
@@ -184,7 +268,7 @@ class ExperimentData(ABC):
         return self.dataset_dict
 
     @staticmethod
-    def _find_dataset_positions(example, token_to_ablate: int):
+    def _find_dataset_positions(example: dict, token_to_ablate: int) -> dict:
         # Create a tensor of zeros with the same shape as example['tokens']
         positions = torch.zeros_like(example["tokens"])
 
