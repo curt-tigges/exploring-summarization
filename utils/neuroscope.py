@@ -128,7 +128,6 @@ def plot_activations(
         str_tokens = model.to_str_tokens(tokens, prepend_bos=False)  # type: ignore
     else:
         str_tokens = text
-    str_tokens = [s.replace(model.tokenizer.pad_token, "") for s in str_tokens]
     if verbose:
         print(f"Tokens shape: {tokens.shape}")
     if activations is None:
@@ -417,7 +416,6 @@ def plot_top_onesided(
                 model=model,
                 dataloader=dataloader,
             )
-        text_window = [s.replace(model.tokenizer.pad_token, "") for s in text_window]
         text_flat = "".join(text_window)
         if text_flat in text_to_not_repeat:
             continue
