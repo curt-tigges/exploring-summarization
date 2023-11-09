@@ -3,6 +3,7 @@ import einops
 from functools import partial
 import re
 import numpy as np
+import numpy as np
 import torch
 import datasets
 from torch import Tensor
@@ -14,12 +15,15 @@ from datasets import (
     load_dataset,
     DatasetDict,
     Dataset,
+    Dataset,
 )
 from jaxtyping import Float, Int, Bool
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import (
     tokenize_and_concatenate,
+    keep_single_column,
+    AutoTokenizer,
     keep_single_column,
     AutoTokenizer,
 )
@@ -127,81 +131,6 @@ def tokenize_truncate_concatenate(
     )
     tokenized_dataset.set_format(type="torch", columns=["tokens"])
     return tokenized_dataset
-
-
-def construct_exclude_list(
-    model: HookedTransformer,
-    regex: List[str] = DEFAULT_EXCLUDE_REGEX,
-) -> List[int]:
-    assert model.tokenizer is not None
-    exclude_list = []
-    for vocab_str, token_id in model.tokenizer.vocab.items():
-        if any([re.search(p, vocab_str) for p in regex]):
-            exclude_list.append(token_id)
-    return exclude_list
-
-
-def mask_positions(
-    dataloader: torch.utils.data.DataLoader,
-    model: HookedTransformer,
-    exclude_following_token: Optional[int] = None,
-    exclude_regex: Optional[List[str]] = None,
-) -> Float[Tensor, "row pos ..."]:
-    """
-    Returns a mask of the same shape as the dataset, with True values at positions to be excluded.
-    TODO:
-        - Add option to change number of following positions to mask
-        - Unify list of regex to single string
-    """
-    num_rows = dataloader.dataset.num_rows
-    seq_len = dataloader.dataset[0]["tokens"].shape[0]
-    mask = torch.ones((num_rows, seq_len), dtype=torch.bool)
-    if exclude_regex is not None:
-        exclude_list = construct_exclude_list(model, exclude_regex)
-        exclude_pt = torch.tensor(exclude_list, device=mask.device)
-    else:
-        exclude_pt = None
-
-    for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-        batch_tokens: Int[Tensor, "batch_size pos"] = batch["tokens"]
-        batch_start = batch_idx * dataloader.batch_size
-        batch_end = batch_start + dataloader.batch_size
-        batch_mask = torch.zeros_like(batch_tokens, dtype=torch.bool)
-        batch_mask[batch["attention_mask"] == 0] = 1
-        if exclude_pt is not None:
-            batch_mask[torch.isin(batch_tokens, exclude_pt)] = 1
-        if exclude_following_token is not None:
-            # Exclude positions directly following token to ablate
-            shifted_tokens = torch.roll(batch_tokens, shifts=1, dims=1)
-            shifted_tokens[
-                :, 0
-            ] = 0  # Set the first column to zero because roll is circular
-            batch_mask[shifted_tokens == exclude_following_token] = 1
-        mask[batch_start:batch_end] = batch_mask
-    return mask
-
-
-DEFAULT_EXCLUDE_REGEX = [
-    r"\]",
-    r"\[",
-    r"\(",
-    r"\)",
-    r",",
-    r":",
-    r";",
-    r"`",
-    r"'",
-    r"\.",
-    r"!",
-    r"\?",
-    r"“",
-    r"{",
-    r"}",
-    r"\\",
-    r"/",
-    r"^g$",
-    r"[0-9]",
-]
 
 
 def construct_exclude_list(
@@ -390,13 +319,10 @@ class ExperimentData(ABC):
         self,
        
         token_to_ablate: Optional[int] = None,
-        exclude_characters: List[str] = DEFAULT_EXCLUDE_CHARACTERS,
-    ,
         truncation: bool = True,
-        max_length: int = None,
     ):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
-        self._tokenize(truncation=truncation, max_length=max_length)
+        self._tokenize(truncation=truncation)
         self.apply_function(self._create_attention_mask)
 
         if token_to_ablate is not None:
@@ -447,7 +373,7 @@ class ExperimentData(ABC):
         pass
 
     @abstractmethod
-    def _tokenize(self, truncation: bool = True, max_length: int = None) -> None:
+    def _tokenize(self, truncation: bool = True) -> None:
         pass
 
 
@@ -459,15 +385,16 @@ class HFData(ExperimentData):
     ):
         super().__init__(dataset_dict, model)
 
-    def _tokenize(self, truncation: bool = True, max_length: int = None):
+    def _tokenize(self, truncation: bool = True):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
         if max_length is None:
             max_length = self.n_ctx
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = tokenize_truncate_concatenate(
+            self.dataset_dict[split] = tokenize_truncate_concatenate(
                 self.dataset_dict[split],
                 self.model.tokenizer,  # type: ignore
-                max_length=max_length,
+                max_length=self.model.cfg.n_ctx,
                 truncation=truncation,
             )
 
