@@ -47,7 +47,7 @@ from utils.tokenwise_ablation import (
     get_layerwise_token_mean_activations,
 )
 from utils.datasets import OWTData, PileFullData, PileSplittedData
-from utils.neuroscope import plot_topk_onesided
+from utils.neuroscope import plot_topk_onesided, plot_top_p
 
 # %%
 device = torch.device("cuda")
@@ -82,11 +82,10 @@ smaller_owt.preprocess_datasets(token_to_ablate=TOKEN_ID)
 smaller_data_loader = smaller_owt.get_dataloaders(batch_size=BATCH_SIZE)[SPLIT]
 
 # %%
-losses = compute_ablation_modified_metric(
+losses = compute_ablation_modified_loss(
     model,
     smaller_data_loader,
     cached_means=comma_mean_values,
-    metric="loss",
     device=device,
 )
 # %%
@@ -95,11 +94,23 @@ losses.shape
 # %%
 plot_topk_onesided(
     ablated_loss_diffs,
-    data_loader,
+    smaller_data_loader,
+    model,
+    k=10
+)
+# %%
+plot_top_p(
+    ablated_loss_diffs.unsqueeze(-1),
+    smaller_data_loader,
     model,
     k=10,
+    p=0.1,
     window_size=50,
 )
+
+# %%
+ablated_loss_diffs.unsqueeze(-1).shape
+
 # %%
 ablated_loss_diffs[0][15:30]
 
