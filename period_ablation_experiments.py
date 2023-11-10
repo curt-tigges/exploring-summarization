@@ -130,12 +130,23 @@ plot_top_onesided(
 =======
 plot_topk_onesided(
     ablated_loss_diffs,
-    data_loader,
+    smaller_data_loader,
+    model,
+    k=10
+)
+# %%
+plot_top_p(
+    ablated_loss_diffs.unsqueeze(-1),
+    smaller_data_loader,
     model,
     k=10,
 >>>>>>> 59a3578 (Started analyzing period ablations)
     window_size=50,
 )
+
+# %%
+ablated_loss_diffs.unsqueeze(-1).shape
+
 # %%
 ablated_loss_diffs[0][15:30]
 
