@@ -362,13 +362,14 @@ def mask_activations(
     return masked_activations
 
 
-def plot_topk_onesided(
+def plot_top_onesided(
     all_activations: Float[Tensor, "row pos ..."],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
     layer: Optional[int] = None,
     neuron: Optional[int] = None,
     k: int = 10,
+    p: Optional[float] = None,
     largest: bool = True,
     window_size: Optional[int] = None,
     centred: bool = True,
@@ -382,12 +383,21 @@ def plot_topk_onesided(
     activations: Float[Tensor, "row pos"] = remove_layer_neuron_dims(
         all_activations, layer=layer, neuron=neuron, base_layer=base_layer
     )
-    # Get top k indices and values
-    top_k_return = torch.topk(activations.flatten(), k=k, largest=largest)
-    assert torch.isfinite(top_k_return.values).all()
-    topk_indices = top_k_return.indices
-    topk_indices = np.array(
-        np.unravel_index(topk_indices.cpu().numpy(), activations.shape)
+    activations_flat: Float[Tensor, "(batch pos)"] = activations.flatten()
+    if p is not None:
+        # Take a random k from the top p% of activations
+        sample_size = int(p * len(activations_flat))
+        top_indices = torch.topk(
+            activations_flat, k=sample_size, largest=largest
+        ).indices
+        top_indices = top_indices[torch.randperm(sample_size)[:k]]
+    else:
+        # Take the top k overall activations
+        top_k_return = torch.topk(activations_flat, k=k, largest=largest)
+        assert torch.isfinite(top_k_return.values).all()
+        top_indices = top_k_return.indices
+    top_indices = np.array(
+        np.unravel_index(top_indices.cpu().numpy(), activations.shape)
     ).T.tolist()
 
     # Construct nested list of texts and activations for plotting
@@ -399,7 +409,7 @@ def plot_topk_onesided(
         (1, 1, k, seq_len),
         dtype=torch.float32,
     )
-    for sample, (batch, pos) in enumerate(topk_indices):
+    for sample, (batch, pos) in enumerate(top_indices):
         if window_size is None:
             text_window: List[str] = model.to_str_tokens(dataloader.dataset[batch]["tokens"])  # type: ignore
             activation_window: Float[Tensor, "pos"] = activations[batch]
@@ -423,7 +433,7 @@ def plot_topk_onesided(
         acts_to_plot[0, 0, sample, :] = activation_window
     rendered_html = topk_samples(
         tokens=[[texts]],  # convert texts from 2D to 4D
-        activations=acts_to_plot,
+        activations=acts_to_plot,  # type: ignore
         zeroth_dimension_name="Model",
         zeroth_dimension_labels=[model.cfg.model_name],
         first_dimension_name="Side",
@@ -431,7 +441,7 @@ def plot_topk_onesided(
     )
     html = rendered_html.local_src if local else rendered_html.cdn_src
     file = ResultsFile(
-        "top_k",
+        "top_activations",
         model=model.cfg.model_name,
         dataloader=dataloader,
         layer=layer,
@@ -449,7 +459,7 @@ def plot_topk_onesided(
     display(rendered_html)
 
 
-def plot_topk(
+def plot_top_twosided(
     activations: Float[Tensor, "row pos ..."],
     dataloader: torch.utils.data.DataLoader,
     model: HookedTransformer,
@@ -457,7 +467,6 @@ def plot_topk(
     layer: int = 0,
     window_size: int = 10,
     centred: bool = True,
-    verbose: bool = False,
     base_layer: Optional[int] = None,
 ):
     """
@@ -465,7 +474,7 @@ def plot_topk(
     Finds topk in a tensor of activations, matches them up against the text from the dataset,
     and plots them neuroscope-style.
     """
-    plot_topk_onesided(
+    plot_top_onesided(
         activations,
         dataloader=dataloader,
         model=model,
@@ -476,7 +485,7 @@ def plot_topk(
         centred=centred,
         base_layer=base_layer,
     )
-    plot_topk_onesided(
+    plot_top_onesided(
         activations,
         dataloader=dataloader,
         model=model,
@@ -486,163 +495,4 @@ def plot_topk(
         window_size=window_size,
         centred=centred,
         base_layer=base_layer,
-    )
-
-
-def _plot_top_p(
-    all_activations: Float[Tensor, "row pos layer"],
-    dataloader: torch.utils.data.DataLoader,
-    model: HookedTransformer,
-    layer: int = 0,
-    p: float = 0.1,
-    k: int = 10,
-    largest: bool = True,
-    window_size: int = 10,
-    centred: bool = True,
-    inclusions: Optional[List[str]] = None,
-    exclusions: Optional[List[str]] = None,
-    local: bool = True,
-):
-    """One-sided top-p plotting. Main entrypoint should be `plot_top_p`."""
-    device = all_activations.device
-    assert not (inclusions is not None and exclusions is not None)
-    label = "positive" if largest else "negative"
-    activations: Float[Tensor, "batch pos"] = all_activations[:, :, layer]
-    if largest:
-        ignore_value = torch.tensor(-np.inf, device=device, dtype=torch.float32)
-    else:
-        ignore_value = torch.tensor(np.inf, device=device, dtype=torch.float32)
-    # create a mask for the inclusions/exclusions
-    if exclusions is not None:
-        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(
-            exclusions, dataloader, model, all_activations
-        )
-        masked_activations = activations.where(~mask, other=ignore_value)
-    elif inclusions is not None:
-        mask: Bool[Tensor, "row pos"] = get_batch_pos_mask(
-            inclusions, dataloader, model, all_activations
-        )
-        masked_activations = activations.where(mask, other=ignore_value)
-    else:
-        masked_activations = activations
-
-    activations_flat: Float[Tensor, "(batch pos)"] = masked_activations.flatten()
-    sample_size = int(p * len(activations_flat))
-    top_p_indices = torch.topk(activations_flat, k=sample_size, largest=largest).indices
-    sampled_indices = top_p_indices[torch.randperm(sample_size)[:k]]
-    top_p_indices = np.array(
-        np.unravel_index(sampled_indices.cpu().numpy(), masked_activations.shape)
-    ).T.tolist()
-    top_p_examples = [
-        dataloader.dataset[b]["tokens"][s].item() for b, s in top_p_indices
-    ]
-    top_p_activations = [masked_activations[b, s].item() for b, s in top_p_indices]
-    # Print the  most positive and negative examples and their activations
-    print(f"Top {k} most {label} examples:")
-    zeros = torch.zeros(
-        (1, all_activations.shape[-1]), device=device, dtype=torch.float32
-    )
-    assert model.tokenizer is not None
-    texts = [model.tokenizer.bos_token]
-    text_to_not_repeat = set()
-    acts = [zeros]
-    text_sep = "\n"
-    topk_zip = zip(top_p_indices, top_p_examples, top_p_activations)
-    for index, example, activation in topk_zip:
-        batch, pos = index
-        text_window: List[str] = extract_text_window(
-            batch, pos, dataloader=dataloader, model=model, window_size=window_size
-        )
-        activation_window: Float[Tensor, "pos layer"] = extract_activations_window(
-            all_activations,
-            batch,
-            pos,
-            window_size=window_size,
-            model=model,
-            dataloader=dataloader,
-        )
-        assert len(text_window) == activation_window.shape[0], (
-            f"Initially text window length {len(text_window)} "
-            f"does not match activation window length {activation_window.shape[0]}"
-        )
-        text_flat = "".join(text_window)
-        if text_flat in text_to_not_repeat:
-            continue
-        text_to_not_repeat.add(text_flat)
-        print(
-            f"Example: {model.to_string(example)}, Activation: {activation:.4f}, Batch: {batch}, Pos: {pos}"
-        )
-        text_window.append(text_sep)
-        activation_window = torch.cat([activation_window, zeros], dim=0)
-        assert len(text_window) == activation_window.shape[0]
-        texts += text_window
-        acts.append(activation_window)
-    acts_cat = einops.repeat(torch.cat(acts, dim=0), "pos layer -> pos layer 1")
-    assert acts_cat.shape[0] == len(texts)
-    rendered_html = plot_activations(
-        texts, model=model, centered=centred, activations=acts_cat, verbose=False
-    )
-    html = rendered_html.local_src if local else rendered_html.cdn_src
-    file = ResultsFile(
-        "top_p",
-        model=model,
-        dataloader=dataloader,
-        layer=layer,
-        p=p,
-        k=k,
-        largest=largest,
-        window_size=window_size,
-        centred=centred,
-        inclusions=inclusions,
-        exclusions=exclusions,
-        extension="html",
-        result_type="plots",
-    )
-    with open(file.path, "w") as f:
-        f.write(html)
-    display(html)
-
-
-def plot_top_p(
-    activations: Float[Tensor, "row pos layer"],
-    dataloader: torch.utils.data.DataLoader,
-    model: HookedTransformer,
-    k: int = 10,
-    p: float = 0.1,
-    layer: int = 0,
-    window_size: int = 10,
-    centred: bool = True,
-    inclusions: Optional[List[str]] = None,
-    exclusions: Optional[List[str]] = None,
-):
-    """
-    Main entrypoint for top-p plotting. Plots both positive and negative examples.
-    Samples k times from the top p% of activations, matches them up against the text from the dataset,
-    and plots them neuroscope-style.
-    """
-    _plot_top_p(
-        activations,
-        dataloader=dataloader,
-        model=model,
-        layer=layer,
-        p=p,
-        k=k,
-        largest=True,
-        window_size=window_size,
-        centred=centred,
-        inclusions=inclusions,
-        exclusions=exclusions,
-    )
-    _plot_top_p(
-        activations,
-        dataloader=dataloader,
-        model=model,
-        layer=layer,
-        p=p,
-        k=k,
-        largest=False,
-        window_size=window_size,
-        centred=centred,
-        inclusions=inclusions,
-        exclusions=exclusions,
     )
