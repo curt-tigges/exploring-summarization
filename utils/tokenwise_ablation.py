@@ -188,22 +188,27 @@ def zero_attention_pos_hook(
 
 
 def compute_ablation_modified_loss(
-        model: HookedTransformer,
-        data_loader: ExperimentDataLoader,
-        layers_to_ablate: List[int] | Literal["all"] = "all",
-        cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
-        direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
-        multiplier=1.0,
-        all_positions: bool = False,
-        device: torch.device = DEFAULT_DEVICE,
-        overwrite: bool = False,
-) -> Float[Tensor, "experiment batch *pos"]:
+    model: HookedTransformer,
+    data_loader: ExperimentDataLoader,
+    layers_to_ablate: List[int] | Literal["all"] = "all",
+    cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
+    direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
+    multiplier=1.0,
+    all_positions: bool = False,
+    device: torch.device = DEFAULT_DEVICE,
+    overwrite: bool = False,
+) -> Float[Tensor, "experiment batch pos"]:
     """
     Computes the change in loss when the activations of
     a particular token are mean-ablated.
 
     If cached_means is specified, then we ablate the full residual stream at every layer.
     if direction_vectors is specified, then we only mean-ablate those directions.
+
+    cf. compute_ablation_modified_logit_diff, key differences:
+        - compute cross entropy loss instead of logit diff
+        - uses all token positions
+        - does not require dataset to have an "answers" column
 
     Args:
         model: HookedTransformer model
@@ -280,8 +285,7 @@ def compute_ablation_modified_loss(
         )
         output[
             experiment_index["orig"],
-            batch_idx * batch_size : (batch_idx + 1) *
-            batch_size,
+            batch_idx * batch_size : (batch_idx + 1) * batch_size,
         ] = orig_metric.cpu()
 
         # Step 2: repeat with tokens ablated
@@ -319,23 +323,28 @@ def compute_ablation_modified_loss(
 
 
 def compute_ablation_modified_logit_diff(
-        model: HookedTransformer,
-        data_loader: ExperimentDataLoader,
-        layers_to_ablate: List[int] | Literal["all"] = "all",
-        cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
-        direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
-        multiplier=1.0,
-        all_positions: bool = False,
-        device: torch.device = DEFAULT_DEVICE,
-        overwrite: bool = False,
-) -> Float[Tensor, "experiment batch *pos"]:
+    model: HookedTransformer,
+    data_loader: ExperimentDataLoader,
+    layers_to_ablate: List[int] | Literal["all"] = "all",
+    cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
+    direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
+    multiplier=1.0,
+    all_positions: bool = False,
+    device: torch.device = DEFAULT_DEVICE,
+    overwrite: bool = False,
+) -> Float[Tensor, "experiment batch"]:
     """
     Computes the change in logit diff when the activations of
     a particular token are mean-ablated.
-    
+
     If cached_means is specified, then we ablate the full residual stream at every layer.
     if direction_vectors is specified, then we only mean-ablate those directions.
-    
+
+    cf. compute_ablation_modified_loss, key differences:
+        - compute logit diff instead of cross entropy loss
+        - uses last token position only
+        - requires dataset to have an "answers" column
+
     Args:
         model: HookedTransformer model
         data_loader: ExperimentDataLoader for the dataset
@@ -394,9 +403,7 @@ def compute_ablation_modified_logit_diff(
         # Step 1: original metric without hooks
 
         # get the logit diff for the last token in each sequence
-        orig_logits = model(
-            batch_tokens, return_type="logits", prepend_bos=False
-        )
+        orig_logits = model(batch_tokens, return_type="logits", prepend_bos=False)
         assert isinstance(orig_logits, Tensor)
         orig_metric = get_logit_diff(
             orig_logits,
@@ -422,9 +429,7 @@ def compute_ablation_modified_logit_diff(
             )
             model.blocks[layer].hook_resid_post.add_hook(hook)
 
-        ablated_logits = model(
-            batch_tokens, return_type="logits", prepend_bos=False
-        )
+        ablated_logits = model(batch_tokens, return_type="logits", prepend_bos=False)
         # check to see if ablated_logits has any nan values
         if torch.isnan(ablated_logits).any():
             print("ablated logits has nan values")
