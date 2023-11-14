@@ -47,7 +47,7 @@ from utils.tokenwise_ablation import (
     get_layerwise_token_mean_activations,
 )
 from utils.datasets import OWTData, PileFullData, PileSplittedData
-from utils.neuroscope import plot_topk_onesided, plot_top_p
+from utils.neuroscope import plot_top_onesided
 
 # %%
 device = torch.device("cuda")
@@ -92,34 +92,25 @@ losses = compute_ablation_modified_loss(
 ablated_loss_diffs = losses[1]
 losses.shape
 # %%
-plot_topk_onesided(
-    ablated_loss_diffs,
-    smaller_data_loader,
-    model,
-    k=10
-)
+plot_top_onesided(ablated_loss_diffs, smaller_data_loader, model, k=10)
 # %%
-plot_top_p(
-    ablated_loss_diffs.unsqueeze(-1),
+plot_top_onesided(
+    ablated_loss_diffs,
     smaller_data_loader,
     model,
     k=10,
     p=0.1,
     window_size=50,
 )
-
-# %%
-ablated_loss_diffs.unsqueeze(-1).shape
-
 # %%
 ablated_loss_diffs[0][15:30]
 
 # %%
 batch = next(iter(data_loader))
-batch['tokens'][0][15:30]
+batch["tokens"][0][15:30]
 
 # %%
-model.to_str_tokens(batch['tokens'][0][15:30])
+model.to_str_tokens(batch["tokens"][0][15:30])
 
 # %%
 exp_data = OWTData.from_model(model)
@@ -128,6 +119,6 @@ exp_data = OWTData.from_model(model)
 ds = exp_data.get_datasets()
 
 # %%
-ds['train'][1]['text']
+ds["train"][1]["text"]
 
 # %%

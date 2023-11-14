@@ -26,7 +26,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from utils.circuit_analysis import get_logit_diff
 from utils.tokenwise_ablation import (
-    compute_ablation_modified_metric,
+    compute_ablation_modified_loss,
     load_directions,
     get_random_directions,
     get_zeroed_dir_vector,
@@ -40,7 +40,7 @@ from utils.datasets import (
     mask_positions,
     construct_exclude_list,
 )
-from utils.neuroscope import plot_topk_onesided
+from utils.neuroscope import plot_top_onesided
 from utils.store import ResultsFile
 
 # %%
@@ -83,11 +83,10 @@ comma_mean_values = get_layerwise_token_mean_activations(
 # %%
 data_loader = exp_data.get_dataloaders(batch_size=1)[SPLIT]
 print(data_loader.name, data_loader.batch_size)
-losses = compute_ablation_modified_metric(
+losses = compute_ablation_modified_loss(
     model,
     data_loader,
     cached_means=comma_mean_values,
-    metric="loss",
     device=device,
     overwrite=OVERWRITE,
 )
@@ -142,7 +141,7 @@ loss_mask |= orig_loss_filter
 # %%
 ablated_loss_diffs = torch.where(loss_mask, 0, losses[1])
 # %%
-plot_topk_onesided(
+plot_top_onesided(
     ablated_loss_diffs,
     data_loader,
     model,
