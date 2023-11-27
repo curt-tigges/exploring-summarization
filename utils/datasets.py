@@ -315,9 +315,7 @@ class ExperimentData(ABC):
             self.dataset_dict[split] = self.dataset_dict[split].map(function, **kwargs)
 
     def preprocess_datasets(
-        
         self,
-       
         token_to_ablate: Optional[int] = None,
         truncation: bool = True,
         max_length: int = None,
@@ -391,7 +389,6 @@ class HFData(ExperimentData):
         if max_length is None:
             max_length = self.n_ctx
         for split in self.dataset_dict.keys():
-            self.dataset_dict[split] = tokenize_truncate_concatenate(
             self.dataset_dict[split] = tokenize_truncate_concatenate(
                 self.dataset_dict[split],
                 self.model.tokenizer,  # type: ignore
