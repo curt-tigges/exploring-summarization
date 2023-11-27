@@ -266,6 +266,7 @@ class ExperimentData(ABC):
         """
         self.dataset_dict = dataset_dict
         self.model = model
+        self.n_ctx = model.cfg.n_ctx
 
     @classmethod
     def from_string(
@@ -313,9 +314,10 @@ class ExperimentData(ABC):
         self,
         token_to_ablate: Optional[int] = None,
         truncation: bool = True,
+        max_length: int = None,
     ):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
-        self._tokenize(truncation=truncation)
+        self._tokenize(truncation=truncation, max_length=max_length)
         self.apply_function(self._create_attention_mask)
 
         if token_to_ablate is not None:
@@ -366,7 +368,7 @@ class ExperimentData(ABC):
         pass
 
     @abstractmethod
-    def _tokenize(self, truncation: bool = True) -> None:
+    def _tokenize(self, truncation: bool = True, max_length: int = None) -> None:
         pass
 
 
@@ -378,13 +380,15 @@ class HFData(ExperimentData):
     ):
         super().__init__(dataset_dict, model)
 
-    def _tokenize(self, truncation: bool = True):
+    def _tokenize(self, truncation: bool = True, max_length: int = None):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
+        if max_length is None:
+            max_length = self.n_ctx
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = tokenize_truncate_concatenate(
                 self.dataset_dict[split],
                 self.model.tokenizer,  # type: ignore
-                max_length=self.model.cfg.n_ctx,
+                max_length=max_length,
                 truncation=truncation,
             )
 
