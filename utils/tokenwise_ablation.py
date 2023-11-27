@@ -267,6 +267,7 @@ def compute_ablation_modified_loss(
     assert batch_size is not None
     for batch_idx, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
         batch_tokens = batch_value["tokens"].to(device)
+        batch_exclusions = batch_value["exclusions"].to(device)
         if all_positions:
             batch_pos = batch_value["attention_mask"].to(device)
         else:
@@ -274,15 +275,29 @@ def compute_ablation_modified_loss(
 
         # Step 1: original metric without hooks
 
-        # get the loss for each token in the batch
-        orig_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
-        )
-        assert isinstance(orig_loss, Tensor)
-        # concatenate column of 0s
-        orig_metric = torch.cat(
-            [torch.zeros((orig_loss.shape[0], 1)).to(device), orig_loss], dim=1
-        )
+        if metric == "logits":
+            # get the logit diff for the last token in each sequence
+            orig_logits, clean_cache = model.run_with_cache(
+                batch_tokens, return_type="logits", prepend_bos=False
+            )
+            assert isinstance(orig_logits, Tensor)
+            orig_metric = get_logit_diff(
+                orig_logits,
+                mask=batch_value["attention_mask"],
+                answer_tokens=batch_value["answers"],
+                per_prompt=True,
+            )
+        else:
+            assert metric == "loss"
+            # get the loss for each token in the batch
+            orig_loss, clean_cache = model.run_with_cache(
+                batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
+            )
+            assert isinstance(orig_loss, Tensor)
+            # concatenate column of 0s to keep the sequence length the same
+            orig_metric = torch.cat(
+                [torch.zeros((orig_loss.shape[0], 1)).to(device), orig_loss], dim=1
+            )
         output[
             experiment_index["orig"],
             batch_idx * batch_size : (batch_idx + 1) * batch_size,
@@ -301,15 +316,31 @@ def compute_ablation_modified_loss(
             )
             model.blocks[layer].hook_resid_post.add_hook(hook)
 
-        # get the loss for each token when run with hooks
-        hooked_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
-        )
-        # concatenate column of 0s
-        hooked_loss = torch.cat(
-            [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
-        )
-        ablated_metric = hooked_loss - orig_metric
+        if metric == "logits":
+            ablated_logits = model(
+                batch_tokens, return_type="logits", prepend_bos=False
+            )
+            # check to see if ablated_logits has any nan values
+            if torch.isnan(ablated_logits).any():
+                print("ablated logits has nan values")
+            ablated_metric = get_logit_diff(
+                ablated_logits,
+                mask=batch_value["attention_mask"],
+                answer_tokens=batch_value["answers"],
+                per_prompt=True,
+            )
+        else:
+            assert metric == "loss"
+            # get the loss for each token when run with hooks
+            hooked_loss = model(
+                batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
+            )
+            # concatenate column of 0s
+            hooked_loss = torch.cat(
+                [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
+            )
+            ablated_metric = hooked_loss - orig_metric
+            ablated_metric[batch_exclusions] = 0
 
         output[
             experiment_index["ablated"],
@@ -429,16 +460,32 @@ def compute_ablation_modified_logit_diff(
             )
             model.blocks[layer].hook_resid_post.add_hook(hook)
 
-        ablated_logits = model(batch_tokens, return_type="logits", prepend_bos=False)
-        # check to see if ablated_logits has any nan values
-        if torch.isnan(ablated_logits).any():
-            print("ablated logits has nan values")
-        ablated_metric = get_logit_diff(
-            ablated_logits,
-            mask=batch_value["attention_mask"],
-            answer_tokens=batch_value["answers"],
-            per_prompt=True,
-        )
+            if metric == "logits":
+                freeze_ablated_logits = model(
+                    batch_tokens, return_type="logits", prepend_bos=False
+                )
+                freeze_ablated_metric = get_logit_diff(
+                    freeze_ablated_logits,
+                    mask=batch_value["attention_mask"],
+                    answer_tokens=batch_value["answers"],
+                    per_prompt=True,
+                )
+            else:
+                assert metric == "loss"
+                # get the loss for each token when run with hooks
+                hooked_loss = model(
+                    batch_tokens,
+                    return_type="loss",
+                    prepend_bos=False,
+                    loss_per_token=True,
+                )
+                # concatenate column of 0s
+                hooked_loss = torch.cat(
+                    [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss],
+                    dim=1,
+                )
+                freeze_ablated_metric = hooked_loss - orig_metric
+                freeze_ablated_metric[batch_exclusions] = 0
 
         output[
             experiment_index["ablated"],
