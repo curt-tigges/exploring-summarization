@@ -21,6 +21,7 @@ from transformer_lens.utils import (
     tokenize_and_concatenate,
     get_act_name,
     test_prompt,
+    lm_cross_entropy_loss,
 )
 from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
@@ -184,6 +185,37 @@ def zero_attention_pos_hook(
     return pattern
 
 
+# -------------------- LOSS UTILS --------------------
+def subset_cross_entropy_loss(
+    logits: Float[torch.Tensor, "batch pos d_vocab"],
+    tokens: Int[torch.Tensor, "batch pos"],
+    vocab_mask: Optional[Bool[torch.Tensor, "d_vocab"]] = None,
+    inf: float = 1e9,
+) -> Float[torch.Tensor, "batch pos"]:
+    """Wrapper around `utils.lm_cross_entropy_loss`.
+
+    Similar to forward() with return_type=="loss".
+
+    N.B. vocab_mask specifies which tokens to include not exclude.
+    """
+    if tokens.device != logits.device:
+        tokens = tokens.to(logits.device)
+    if vocab_mask is not None:
+        logits = logits.masked_fill(~vocab_mask, -inf)
+    loss = lm_cross_entropy_loss(logits, tokens, per_token=True)
+    return loss
+
+
+def loss_fn(
+    model: HookedTransformer,
+    tokens: Int[Tensor, "batch pos"],
+    vocab_mask: Optional[Bool[Tensor, "d_vocab"]] = None,
+) -> Float[Tensor, "batch pos"]:
+    """Computes the cross entropy loss for a batch of tokens"""
+    logits = model(tokens, return_type="logits", prepend_bos=False)
+    return subset_cross_entropy_loss(logits, tokens, vocab_mask)
+
+
 # -------------------- EXPERIMENTS --------------------
 
 
@@ -195,6 +227,7 @@ def compute_ablation_modified_loss(
     direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
     multiplier=1.0,
     all_positions: bool = False,
+    vocab_mask: Optional[Bool[Tensor, "d_vocab"]] = None,
     device: torch.device = DEFAULT_DEVICE,
     overwrite: bool = False,
 ) -> Float[Tensor, "experiment batch pos"]:
@@ -225,6 +258,8 @@ def compute_ablation_modified_loss(
         all_positions:
             If True, ablate all positions in the sequence.
             Otherwise, only ablate the positions specified in the data loader.
+        vocab_mask:
+            Inclusion mask of shape (vocab_size,) to apply to the logits
         device:
             Device to run the experiment on
 
@@ -240,6 +275,7 @@ def compute_ablation_modified_loss(
         direction_vectors=direction_vectors,
         multiplier=multiplier,
         all_positions=all_positions,
+        vocab_mask=vocab_mask,
         extension="pt",
     )
     if not overwrite and file.exists():
@@ -275,8 +311,10 @@ def compute_ablation_modified_loss(
         # Step 1: original metric without hooks
 
         # get the loss for each token in the batch
-        orig_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
+        orig_loss = loss_fn(
+            model,
+            batch_tokens,
+            vocab_mask,
         )
         assert isinstance(orig_loss, Tensor)
         # concatenate column of 0s
@@ -302,9 +340,7 @@ def compute_ablation_modified_loss(
             model.blocks[layer].hook_resid_post.add_hook(hook)
 
         # get the loss for each token when run with hooks
-        hooked_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
-        )
+        hooked_loss = loss_fn(model, batch_tokens, vocab_mask)
         # concatenate column of 0s
         hooked_loss = torch.cat(
             [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
@@ -455,6 +491,7 @@ def compute_zeroed_attn_modified_loss(
     data_loader: ExperimentDataLoader,
     heads_to_ablate: List[Tuple[int, int]],
     token_ids: List[int] = [13],
+    vocab_mask: Optional[Bool[Tensor, "d_vocab"]] = None,
     device: torch.device = DEFAULT_DEVICE,
 ) -> Float[Tensor, "batch"]:
     loss_list = []
@@ -464,9 +501,7 @@ def compute_zeroed_attn_modified_loss(
         batch_pos = find_positions(batch_tokens, token_ids=token_ids)
 
         # get the loss for each token in the batch
-        initial_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
-        )
+        initial_loss = loss_fn(model, batch_tokens, vocab_mask)
 
         # add hooks for the activations of the 11 and 13 tokens
         for layer, head in heads_to_ablate:
@@ -478,9 +513,7 @@ def compute_zeroed_attn_modified_loss(
             model.blocks[layer].attn.hook_pattern.add_hook(ablate_tokens)
 
         # get the loss for each token when run with hooks
-        hooked_loss = model(
-            batch_tokens, return_type="loss", prepend_bos=False, loss_per_token=True
-        )
+        hooked_loss = loss_fn(model, batch_tokens, vocab_mask)
 
         # compute the percent difference between the two losses
         loss_diff = (hooked_loss - initial_loss) / initial_loss

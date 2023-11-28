@@ -65,6 +65,32 @@ TOKEN_ID = model.to_single_token(TOKEN)
 assert isinstance(TOKEN_ID, int)
 print(TOKEN_ID)
 # %%
+exclude_regex = [
+    r"\]",
+    r"\[",
+    r"\(",
+    r"\)",
+    r",",
+    r":",
+    r";",
+    r"`",
+    r"'",
+    r"\.",
+    r"!",
+    r"\?",
+    r"“",
+    r"{",
+    r"}",
+    r"\\",
+    r"/",
+    r"^g$",
+    r"[0-9]",
+]
+exclude_list = construct_exclude_list(model, exclude_regex)
+vocab_mask = torch.ones(model.vocab_size, dtype=torch.bool)
+vocab_mask[exclude_list] = False
+print(len(exclude_list), vocab_mask.sum().item())
+# %%
 exp_data = PileSplittedData.from_model(
     model,
     name=NAME,
@@ -87,6 +113,7 @@ losses = compute_ablation_modified_loss(
     model,
     data_loader,
     cached_means=comma_mean_values,
+    vocab_mask=vocab_mask,
     device=device,
     overwrite=OVERWRITE,
 )
@@ -106,30 +133,6 @@ fig.show()
 # %%
 MAX_ORIG_LOSS = 6
 orig_loss_filter = orig_losses > MAX_ORIG_LOSS
-exclude_regex = [
-    r"\]",
-    r"\[",
-    r"\(",
-    r"\)",
-    r",",
-    r":",
-    r";",
-    r"`",
-    r"'",
-    r"\.",
-    r"!",
-    r"\?",
-    r"“",
-    r"{",
-    r"}",
-    r"\\",
-    r"/",
-    r"^g$",
-    r"[0-9]",
-]
-# %%
-exclude_list = construct_exclude_list(model, exclude_regex)
-len(exclude_list)
 # %%
 loss_mask = mask_positions(
     data_loader,
