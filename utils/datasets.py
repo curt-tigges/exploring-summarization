@@ -312,10 +312,24 @@ class ExperimentData(ABC):
     def preprocess_datasets(
         self,
         token_to_ablate: Optional[int] = None,
+        streaming: bool = False,
+        max_length: Optional[int] = None,
+        column_name: str = "text",
+        add_bos_token: bool = True,
+        num_proc: int = 10,
+        padding: bool = True,
         truncation: bool = True,
     ):
         """Preprocesses the dataset. This function can be overridden by subclasses, but should always result in a dataset with a 'tokens' column"""
-        self._tokenize(truncation=truncation)
+        self._tokenize(
+            streaming=streaming,
+            max_length=max_length,
+            column_name=column_name,
+            add_bos_token=add_bos_token,
+            num_proc=num_proc,
+            padding=padding,
+            truncation=truncation,
+        )
         self.apply_function(self._create_attention_mask)
 
         if token_to_ablate is not None:
@@ -366,7 +380,16 @@ class ExperimentData(ABC):
         pass
 
     @abstractmethod
-    def _tokenize(self, truncation: bool = True) -> None:
+    def _tokenize(
+        self,
+        streaming: bool = False,
+        max_length: Optional[int] = None,
+        column_name: str = "text",
+        add_bos_token: bool = True,
+        num_proc: int = 10,
+        padding: bool = True,
+        truncation: bool = True,
+    ) -> None:
         pass
 
 
@@ -378,13 +401,29 @@ class HFData(ExperimentData):
     ):
         super().__init__(dataset_dict, model)
 
-    def _tokenize(self, truncation: bool = True):
+    def _tokenize(
+        self,
+        streaming: bool = False,
+        max_length: Optional[int] = None,
+        column_name: str = "text",
+        add_bos_token: bool = True,
+        num_proc: int = 10,
+        padding: bool = True,
+        truncation: bool = True,
+    ):
         """Preprocesses the dataset by tokenizing and concatenating the text column"""
+        if max_length is None:
+            max_length = self.model.cfg.n_ctx
         for split in self.dataset_dict.keys():
             self.dataset_dict[split] = tokenize_truncate_concatenate(
-                self.dataset_dict[split],
-                self.model.tokenizer,  # type: ignore
-                max_length=self.model.cfg.n_ctx,
+                dataset=self.dataset_dict[split],
+                tokenizer=self.model.tokenizer,  # type: ignore
+                streaming=streaming,
+                max_length=max_length,
+                column_name=column_name,
+                add_bos_token=add_bos_token,
+                num_proc=num_proc,
+                padding=padding,
                 truncation=truncation,
             )
 
