@@ -190,7 +190,7 @@ def subset_cross_entropy_loss(
     logits: Float[torch.Tensor, "batch pos d_vocab"],
     tokens: Int[torch.Tensor, "batch pos"],
     vocab_mask: Optional[Bool[torch.Tensor, "d_vocab"]] = None,
-    inf: float = 1e9,
+    inf: float = float("inf"),
 ) -> Float[torch.Tensor, "batch pos"]:
     """Wrapper around `utils.lm_cross_entropy_loss`.
 
@@ -203,6 +203,11 @@ def subset_cross_entropy_loss(
     if vocab_mask is not None:
         logits = logits.masked_fill(~vocab_mask, -inf)
     loss = lm_cross_entropy_loss(logits, tokens, per_token=True)
+    loss = torch.where(
+        torch.isclose(loss, torch.tensor(inf)),
+        torch.zeros_like(loss),
+        loss,
+    )
     return loss
 
 
