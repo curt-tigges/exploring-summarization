@@ -50,6 +50,8 @@ DEFAULT_EXCLUDE_REGEX = [
     r"/",
     r"^g$",
     r"[0-9]",
+    r"\b(?:Mr|Mrs|Ms|Dr)\.",  # Matches titles like Mr., Mrs., etc.
+    r"\b[A-Z]\."              # Matches any single capital letter followed by a period (acronyms)
 ]
 
 

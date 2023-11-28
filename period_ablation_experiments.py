@@ -50,9 +50,19 @@ from utils.datasets import OWTData, PileFullData, PileSplittedData
 from utils.neuroscope import plot_top_onesided
 
 # %%
+from IPython import get_ipython
+ipython = get_ipython()
+ipython.run_line_magic("load_ext", "autoreload")
+ipython.run_line_magic("autoreload", "2")
+
+# %%
+torch.
+
+# %%
 device = torch.device("cuda")
 MODEL_NAME = "gpt2-small"
 BATCH_SIZE = 8
+ITEM_MAX_LENGTH = 128
 TOKEN = "."
 SPLIT = "train"
 NAME = None
@@ -65,10 +75,13 @@ assert isinstance(TOKEN_ID, int)
 print(TOKEN_ID)
 # %%
 exp_data = OWTData.from_model(model)
-exp_data.preprocess_datasets(token_to_ablate=TOKEN_ID, max_length=64)
+exp_data.preprocess_datasets(token_to_ablate=TOKEN_ID, max_length=ITEM_MAX_LENGTH)
 # %%
 data_loader = exp_data.get_dataloaders(batch_size=BATCH_SIZE)[SPLIT]
 print(data_loader.name)
+# %%
+data_loader.dataset[0]['tokens'].shape
+
 # %%
 comma_mean_values = get_layerwise_token_mean_activations(
     model, data_loader, token_id=TOKEN_ID, device=device
@@ -78,7 +91,7 @@ smaller_owt = OWTData.from_model(model)
 smaller_owt.dataset_dict[SPLIT] = smaller_owt.dataset_dict[SPLIT].select(
     list(range(100))
 )
-smaller_owt.preprocess_datasets(token_to_ablate=TOKEN_ID)
+smaller_owt.preprocess_datasets(token_to_ablate=TOKEN_ID, max_length=ITEM_MAX_LENGTH)
 smaller_data_loader = smaller_owt.get_dataloaders(batch_size=BATCH_SIZE)[SPLIT]
 
 # %%
@@ -87,47 +100,19 @@ losses = compute_ablation_modified_loss(
     smaller_data_loader,
     cached_means=comma_mean_values,
     device=device,
+    cached=False
 )
 # %%
 ablated_loss_diffs = losses[1]
 losses.shape
 # %%
-plot_topk_onesided(
+plot_top_onesided(
     ablated_loss_diffs,
     smaller_data_loader,
     model,
     k=10
 )
 # %%
-plot_top_p(
-    ablated_loss_diffs.unsqueeze(-1),
-    smaller_data_loader,
-    model,
-    k=10,
-    p=0.1,
-    window_size=50,
-)
-
-# %%
-ablated_loss_diffs.unsqueeze(-1).shape
-
-# %%
-ablated_loss_diffs[0][15:30]
-
-# %%
-batch = next(iter(data_loader))
-batch['tokens'][0][15:30]
-
-# %%
-model.to_str_tokens(batch['tokens'][0][15:30])
-
-# %%
-exp_data = OWTData.from_model(model)
-
-# %%
-ds = exp_data.get_datasets()
-
-# %%
-ds['train'][1]['text']
+ablated_loss_diffs[0]
 
 # %%
