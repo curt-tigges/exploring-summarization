@@ -280,7 +280,7 @@ def compute_ablation_modified_loss(
         direction_vectors=direction_vectors,
         multiplier=multiplier,
         all_positions=all_positions,
-        vocab_mask=vocab_mask,
+        vocab_mask=(None if vocab_mask is None else vocab_mask.sum()),
         extension="pt",
     )
     if not overwrite and file.exists():
