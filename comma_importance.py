@@ -1,6 +1,7 @@
 # %%
 import einops
 from functools import partial
+import numpy as np
 import torch
 import datasets
 import re
@@ -134,7 +135,7 @@ fig = px.histogram(
 )
 fig.show()
 # %%
-MAX_ORIG_LOSS = 6
+MAX_ORIG_LOSS = 4
 orig_loss_filter = orig_losses > MAX_ORIG_LOSS
 # %%
 loss_mask = mask_positions(
@@ -255,20 +256,39 @@ fig.write_html(boxfile.path)
 # boxfile.save(fig)
 fig.show()
 # %%
-prompt = """
---- 
-abstract: 'If the large scale structure of the Universe was created, even partially, via Zeldovich pancakes, than the fluctuations of the CMB radiation should be formed due to bulk comptonization of black body spectrum on the contracting pancake. Approximate formulaes for the CMB energy spectrum after bulk comptonization are obtained. The difference between comptonized energy spectra of the CMB due to thermal and bulk comptonozation may be estimated by comparison of the plots for the spectra in these two cases.' 
-author: 
-- 'G.S. Bisnovatyi-Kogan [^1]' 
-title: Spectral distortions in CMB by the bulk Comptonization due to Zeldovich
-"""
-tokens = model.to_tokens(prompt)
+for batch_idx, batch in enumerate(data_loader):
+    tokens = batch["tokens"].to(device)
+    if (tokens == model.to_single_token(" pancakes")).any():
+        where = torch.where(tokens == model.to_single_token(" pancakes"))
+        pancake_idx = 1
+        bat = where[0][pancake_idx]
+        pos = where[1][pancake_idx]
+        prompt_tokens = tokens[bat : bat + 1, :pos]
+        prompt = model.to_string(prompt_tokens[0])
+        break
+print(orig_losses[batch_idx * data_loader.batch_size + bat, pos])
+print(ablated_loss_diffs[batch_idx * data_loader.batch_size + bat, pos])
+print(prompt)
+# %%
+# prompt = """
+# ---
+# abstract: 'If the large scale structure of the Universe was created, even partially, via Zeldovich pancakes, than the fluctuations of the CMB radiation should be formed due to bulk comptonization of black body spectrum on the contracting pancake. Approximate formulaes for the CMB energy spectrum after bulk comptonization are obtained. The difference between comptonized energy spectra of the CMB due to thermal and bulk comptonozation may be estimated by comparison of the plots for the spectra in these two cases.'
+# author:
+# - 'G.S. Bisnovatyi-Kogan [^1]'
+# title: Spectral distortions in CMB by the bulk Comptonization due to Zeldovich
+# """
+# prompt_tokens = model.to_tokens(prompt)
+model.reset_hooks()
 prompt_means = get_batch_token_mean_activations(
-    model, tokens.unsqueeze(0), TOKEN_ID, device=device
+    model, prompt_tokens, TOKEN_ID, device=device
+)
+prompt_mask = torch.isin(
+    prompt_tokens, torch.tensor(exclude_list, device=prompt_tokens.device)
 )
 test_prompt(prompt, "pancakes", model)
 # %%
-# FIXME: continue here
-ablation_hook = AblationHook(
-    model, torch.isin(tokens, exclude_list), cached_means=prompt_means
-)
+ablation_hook = AblationHook(model, prompt_mask, cached_means=prompt_means)
+with ablation_hook:
+    test_prompt(prompt, "pancakes", model)
+
+# %%
