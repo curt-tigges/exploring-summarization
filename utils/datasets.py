@@ -451,6 +451,28 @@ class OWTData(HFData):
             num_proc=num_proc,
             data_files=data_files,
             verbose=verbose,
+        )    
+
+
+class RuleTakerData(HFData):
+    """Class for the RuleTaker dataset"""
+
+    @classmethod
+    def from_model(
+        cls,
+        model: HookedTransformer,
+        split: Optional[str] = None,
+        num_proc: int | None = None,
+        data_files: List[str] | None = None,
+        verbose: bool = False,
+    ):
+        return cls.from_string(
+            "tasksource/ruletaker",
+            model,
+            split=split,
+            num_proc=num_proc,
+            data_files=data_files,
+            verbose=verbose,
         )
 
 
