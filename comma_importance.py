@@ -31,6 +31,8 @@ from utils.tokenwise_ablation import (
     get_random_directions,
     get_zeroed_dir_vector,
     get_layerwise_token_mean_activations,
+    AblationHook,
+    get_batch_token_mean_activations,
 )
 from utils.datasets import (
     OWTData,
@@ -45,7 +47,7 @@ from utils.store import ResultsFile
 
 # %%
 device = torch.device("cuda")
-MODEL_NAME = "pythia-1.4b"
+MODEL_NAME = "gpt2-small"
 TOKEN = ","
 SPLIT = "train[:100]"
 NAME = "ArXiv"
@@ -87,9 +89,9 @@ exclude_regex = [
     r"[0-9]",
 ]
 exclude_list = construct_exclude_list(model, exclude_regex)
-vocab_mask = torch.ones(model.vocab_size, dtype=torch.bool)
+vocab_mask = torch.ones(model.cfg.d_vocab, dtype=torch.bool, device=device)
 vocab_mask[exclude_list] = False
-print(len(exclude_list), vocab_mask.sum().item())
+print(len(exclude_list), vocab_mask.sum().item(), len(vocab_mask))
 # %%
 exp_data = PileSplittedData.from_model(
     model,
@@ -101,13 +103,13 @@ exp_data = PileSplittedData.from_model(
 exp_data.preprocess_datasets(token_to_ablate=TOKEN_ID)
 exp_data.dataset_dict
 # %%
-data_loader = exp_data.get_dataloaders(batch_size=8)[SPLIT]
+data_loader = exp_data.get_dataloaders(batch_size=16)[SPLIT]
 print(data_loader.name, data_loader.batch_size)
 comma_mean_values = get_layerwise_token_mean_activations(
     model, data_loader, token_id=TOKEN_ID, device=device, overwrite=OVERWRITE
 )
 # %%
-data_loader = exp_data.get_dataloaders(batch_size=1)[SPLIT]
+data_loader = exp_data.get_dataloaders(batch_size=8)[SPLIT]
 print(data_loader.name, data_loader.batch_size)
 losses = compute_ablation_modified_loss(
     model,
@@ -121,6 +123,7 @@ losses.shape
 # %%
 orig_losses = losses[0]
 orig_losses_flat = orig_losses.flatten()
+orig_losses_flat = orig_losses_flat[orig_losses_flat > 0]
 orig_losses_sample = torch.randperm(len(orig_losses_flat))[:1_000]
 orig_losses_flat = orig_losses_flat[orig_losses_sample]
 fig = px.histogram(
@@ -149,7 +152,7 @@ plot_top_onesided(
     data_loader,
     model,
     k=50,
-    window_size=30,
+    # window_size=30,
     centred=False,
     local=True,
 )
@@ -252,3 +255,20 @@ fig.write_html(boxfile.path)
 # boxfile.save(fig)
 fig.show()
 # %%
+prompt = """
+--- 
+abstract: 'If the large scale structure of the Universe was created, even partially, via Zeldovich pancakes, than the fluctuations of the CMB radiation should be formed due to bulk comptonization of black body spectrum on the contracting pancake. Approximate formulaes for the CMB energy spectrum after bulk comptonization are obtained. The difference between comptonized energy spectra of the CMB due to thermal and bulk comptonozation may be estimated by comparison of the plots for the spectra in these two cases.' 
+author: 
+- 'G.S. Bisnovatyi-Kogan [^1]' 
+title: Spectral distortions in CMB by the bulk Comptonization due to Zeldovich
+"""
+tokens = model.to_tokens(prompt)
+prompt_means = get_batch_token_mean_activations(
+    model, tokens.unsqueeze(0), TOKEN_ID, device=device
+)
+test_prompt(prompt, "pancakes", model)
+# %%
+# FIXME: continue here
+ablation_hook = AblationHook(
+    model, torch.isin(tokens, exclude_list), cached_means=prompt_means
+)

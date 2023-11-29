@@ -107,6 +107,42 @@ def get_zeroed_dir_vector(
 
 
 # -------------------- ACTIVATION UTILS --------------------
+def get_batch_token_mean_activations(
+    model: HookedTransformer,
+    tokens: Int[Tensor, "batch seq_len"],
+    token_id: int,
+    activation_sums: Optional[Float[Tensor, "layer d_model"]] = None,
+    device: torch.device = DEFAULT_DEVICE,
+) -> Float[Tensor, "layer d_model"]:
+    """
+    Called by get_layerwise_token_mean_activations for each batch
+    """
+    num_layers = model.cfg.n_layers
+    d_model = model.cfg.d_model
+    if activation_sums is None:
+        activation_sums = torch.zeros(
+            (num_layers, d_model), device=device, dtype=torch.float32
+        )
+    tokens = tokens.to(device)
+
+    # Get binary mask of positions where token_id matches in the batch of tokens
+    token_mask = tokens == token_id
+
+    _, cache = model.run_with_cache(tokens, names_filter=resid_names_filter)
+
+    for layer in range(num_layers):
+        layer_activations = cache[f"blocks.{layer}.hook_resid_post"]
+        activation_sums[layer] += (
+            einops.einsum(
+                layer_activations,
+                token_mask.float(),
+                "batch seq d_model, batch seq -> d_model",
+            )
+            / token_mask.sum()
+        )
+    return activation_sums
+
+
 def get_layerwise_token_mean_activations(
     model: HookedTransformer,
     data_loader: ExperimentDataLoader,
@@ -140,29 +176,20 @@ def get_layerwise_token_mean_activations(
     activation_sums: Float[Tensor, "layer d_model"] = torch.zeros(
         (num_layers, d_model), device=device, dtype=torch.float32
     )
-    token_count: int = 0
+    n_batches = len(data_loader)
+    for _, batch_value in tqdm(enumerate(data_loader), total=n_batches):
+        get_batch_token_mean_activations(
+            model,
+            batch_value["tokens"],
+            token_id,
+            activation_sums,
+            device,
+        )
 
-    for _, batch_value in tqdm(enumerate(data_loader), total=len(data_loader)):
-        batch_tokens = batch_value["tokens"].to(device)
+    activation_sums = (activation_sums / n_batches).cpu()
 
-        # Get binary mask of positions where token_id matches in the batch of tokens
-        token_mask = batch_tokens == token_id
-        token_count += token_mask.sum()
-
-        _, cache = model.run_with_cache(batch_tokens, names_filter=resid_names_filter)
-
-        for layer in range(num_layers):
-            layer_activations = cache[f"blocks.{layer}.hook_resid_post"]
-            activation_sums[layer] += einops.einsum(
-                layer_activations,
-                token_mask.float(),
-                "batch seq d_model, batch seq -> d_model",
-            )
-
-    token_mean_values = (activation_sums / token_count).cpu()
-
-    torch.save(token_mean_values, file.path)
-    return token_mean_values
+    torch.save(activation_sums, file.path)
+    return activation_sums
 
 
 # -------------------- ABLATION UTILS --------------------
@@ -183,6 +210,46 @@ def zero_attention_pos_hook(
             pattern[i, head_idx, p, p] = 0
 
     return pattern
+
+
+class AblationHook:
+    def __init__(
+        self,
+        model: HookedTransformer,
+        pos_mask: Int[Tensor, "batch pos"],
+        layers_to_ablate: List[int] | Literal["all"] = "all",
+        cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
+        direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
+        multiplier: float = 1.0,
+        all_positions: bool = False,
+        device: torch.device = DEFAULT_DEVICE,
+    ):
+        if layers_to_ablate == "all":
+            layers_to_ablate = list(range(model.cfg.n_layers))
+        self.model = model
+        self.layers_to_ablate = layers_to_ablate
+        self.pos_mask = pos_mask
+        self.cached_means = cached_means
+        self.direction_vectors = direction_vectors
+        self.multiplier = multiplier
+        self.all_positions = all_positions
+        self.device = device
+
+    def __enter__(self):
+        for layer in self.layers_to_ablate:
+            hook = partial(
+                ablation_hook_base,
+                cached_means=self.cached_means,
+                direction_vectors=self.direction_vectors,
+                multiplier=self.multiplier,
+                pos_mask=self.pos_mask,
+                layer=layer,
+            )
+            self.model.blocks[layer].hook_resid_post.add_hook(hook)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.model.reset_hooks()
 
 
 # -------------------- LOSS UTILS --------------------
@@ -332,20 +399,19 @@ def compute_ablation_modified_loss(
         ] = orig_metric.cpu()
 
         # Step 2: repeat with tokens ablated
-
-        for layer in layers_to_ablate:
-            hook = partial(
-                ablation_hook_base,
-                cached_means=cached_means,
-                direction_vectors=direction_vectors,
-                multiplier=multiplier,
-                pos_mask=batch_pos,
-                layer=layer,
-            )
-            model.blocks[layer].hook_resid_post.add_hook(hook)
-
-        # get the loss for each token when run with hooks
-        hooked_loss = loss_fn(model, batch_tokens, vocab_mask)
+        ablation_hook = AblationHook(
+            model,
+            pos_mask=batch_pos,
+            layers_to_ablate=layers_to_ablate,
+            cached_means=cached_means,
+            direction_vectors=direction_vectors,
+            multiplier=multiplier,
+            all_positions=all_positions,
+            device=device,
+        )
+        with ablation_hook:
+            # get the loss for each token when run with hooks
+            hooked_loss = loss_fn(model, batch_tokens, vocab_mask)
         # concatenate column of 0s
         hooked_loss = torch.cat(
             [torch.zeros((hooked_loss.shape[0], 1)).to(device), hooked_loss], dim=1
