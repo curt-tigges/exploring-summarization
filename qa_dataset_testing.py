@@ -132,19 +132,20 @@ tokenized_datasets['train'][0]['input_ids'].shape, tokenized_datasets['train'][0
 # %%
 from transformers import AutoModelForCausalLM
 torch.set_grad_enabled(True)
-model = AutoModelForCausalLM.from_pretrained(model_checkpoint)
+#load model from results folder
+model = AutoModelForCausalLM.from_pretrained('results')
 
 # %%
 from transformers import Trainer, TrainingArguments
 
 training_args = TrainingArguments(
-    output_dir="./results/checkpoints",
+    output_dir="./results",
     evaluation_strategy="epoch",
     save_strategy="epoch",
     learning_rate=2e-5,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
-    num_train_epochs=3,
+    per_device_train_batch_size=40,
+    per_device_eval_batch_size=40,
+    num_train_epochs=7,
     weight_decay=0.01,
 )
 
@@ -157,9 +158,6 @@ trainer = Trainer(
 )
 
 trainer.train()
-
-# %%
-trainer.evaluate(tokenized_datasets["test"])
 
 # %%
 from datasets import load_metric
@@ -214,9 +212,9 @@ accuracy = evaluate(model, tokenizer, test_dataset)
 print(f"Accuracy: {accuracy}")
 
 # %%
-dataset['test'].select(list(range(100)))
+trainer.evaluate(tokenized_datasets["test"])
 
 # %%
-trainer.save_model("results/checkpoints/pythia-410m")
+trainer.save_model("results")
 
 # %%
