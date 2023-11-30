@@ -287,10 +287,10 @@ class ExperimentData(ABC):
             ]
             data_name = data_files[0].split("/")[-3]
             if name is None:
-                name = data_name
-            assert (
-                name == data_name
-            ), f"Name {name} does not match data name {data_name}"
+                name = data_name.replace("%20", " ")
+            assert name == data_name.replace(
+                "%20", " "
+            ), f"Name {name} does not match data name {data_name.replace('%20', ' ')}"
         if verbose:
             print(
                 f"load_dataset: path={path}, name={name}, split={split}, num_proc={num_proc}, data_files={data_files}"
