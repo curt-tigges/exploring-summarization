@@ -79,9 +79,6 @@ def format_questions(example):
 dataset = ds.map(format_questions)
 
 # %%
-print(ds['train'][1]['prompt'])
-
-# %%
 from transformers import AutoTokenizer
 
 model_checkpoint = "EleutherAI/pythia-410m"  # or any other appropriate small model
@@ -133,12 +130,6 @@ tokenized_datasets['train'][0]['input_ids'].shape, tokenized_datasets['train'][0
 
 
 # %%
-tokenized_datasets.set_format(type="torch", columns=["input_ids", "labels"])
-
-# %%
-tokenized_datasets
-
-# %%
 from transformers import AutoModelForCausalLM
 torch.set_grad_enabled(True)
 model = AutoModelForCausalLM.from_pretrained(model_checkpoint)
@@ -147,7 +138,7 @@ model = AutoModelForCausalLM.from_pretrained(model_checkpoint)
 from transformers import Trainer, TrainingArguments
 
 training_args = TrainingArguments(
-    output_dir="./results/checkpoints/pythia-410m-ruletaker",
+    output_dir="./results/checkpoints",
     evaluation_strategy="epoch",
     save_strategy="epoch",
     learning_rate=2e-5,
@@ -160,7 +151,7 @@ training_args = TrainingArguments(
 trainer = Trainer(
     model=model,
     args=training_args,
-    train_dataset=tokenized_datasets["dev"].select(range(20000)),
+    train_dataset=tokenized_datasets["train"].select(range(80000)),
     eval_dataset=tokenized_datasets["test"].select(range(1000)),
     tokenizer=tokenizer,
 )
@@ -224,5 +215,8 @@ print(f"Accuracy: {accuracy}")
 
 # %%
 dataset['test'].select(list(range(100)))
+
+# %%
+trainer.save_model("results/checkpoints/pythia-410m")
 
 # %%
