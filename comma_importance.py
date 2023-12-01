@@ -323,6 +323,15 @@ with minimal_hook:
         prompt, prompt_answer, model, top_k=top_k, prepend_space_to_answer=False
     )
 # %%
+prompt_file = ResultsFile(
+    "prompt",
+    model=MODEL_NAME,
+    data=data_loader.name,
+    result_type="cache",
+    extension="txt",
+)
+prompt_file.save(prompt)
+# %%
 """
 TODO:
 * Debug Zeldovich pancakes snippet
