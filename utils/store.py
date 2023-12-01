@@ -109,7 +109,17 @@ def args_to_file_name(**kwargs):
     """Converts a dictionary of arguments to a file name"""
     file_name = ""
     for key, value in kwargs.items():
-        if value is None or (hasattr(value, "__len__") and len(value) == 0):
+        if value is None:
+            continue
+        elif hasattr(value, "nelement") and value.nelement() == 0:
+            continue
+        elif hasattr(value, "nelement") and value.nelement() == 1:
+            value = value.item()
+            if isinstance(value, int):
+                value = str(value)
+            else:
+                value = "{:.2f}".format(value).replace(".", "_")
+        elif hasattr(value, "__len__") and len(value) == 0:
             continue
         elif key in ARGS_TO_INGORE:
             continue
