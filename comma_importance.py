@@ -49,7 +49,7 @@ from utils.store import ResultsFile
 # %%
 device = torch.device("cuda")
 MODEL_NAME = "gpt2-small"
-TOKEN = ":"
+TOKEN = ","
 SPLIT = "train"
 DATA_FILES = [
     "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/ArXiv/train/data-00000-of-00222.arrow",
@@ -296,17 +296,27 @@ print(prompt)
 # title: Spectral distortions in CMB by the bulk Comptonization due to Zeldovich
 # """
 # prompt_tokens = model.to_tokens(prompt)
+assert isinstance(prompt, str)
 top_k = 30
 model.reset_hooks()
 prompt_mask = prompt_tokens == TOKEN_ID
 prompt_str_tokens = model.to_str_tokens(prompt_tokens)
-test_prompt(prompt, prompt_answer, model, top_k=top_k, prepend_space_to_answer=False)
+my_test_prompt = partial(
+    test_prompt,
+    prompt=prompt,
+    answer=prompt_answer,
+    model=model,
+    top_k=top_k,
+    prepend_space_to_answer=False,
+    prepend_bos=False,
+)
+print("Baseline")
+my_test_prompt()
 # %%
+print("Ablate all occurences of token")
 ablation_hook = AblationHook(model, prompt_mask, cached_means=token_mean_values)
 with ablation_hook:
-    test_prompt(
-        prompt, prompt_answer, model, top_k=top_k, prepend_space_to_answer=False
-    )
+    my_test_prompt()
 # %%
 minimal_mask = torch.zeros_like(prompt_mask)
 minimal_mask[:, torch.where(prompt_mask)[-1][-1]] = 1
@@ -317,11 +327,24 @@ print(
     [prompt_str_tokens[i - 1 : i + 1] for i in torch.where(minimal_mask)[-1]],
 )
 # %%
+print("Ablate last occurence of token")
 minimal_hook = AblationHook(model, minimal_mask, cached_means=token_mean_values)
 with minimal_hook:
-    test_prompt(
-        prompt, prompt_answer, model, top_k=top_k, prepend_space_to_answer=False
-    )
+    my_test_prompt()
+# %%
+print("Zero last occurence of token")
+zero_hook = AblationHook(
+    model, minimal_mask, cached_means=torch.zeros_like(token_mean_values)
+)
+with zero_hook:
+    my_test_prompt()
+# %%
+print("Ablate random position")
+random_mask = torch.zeros_like(prompt_mask)
+random_mask[:, 20] = 1
+random_hook = AblationHook(model, random_mask, cached_means=token_mean_values)
+with random_hook:
+    my_test_prompt()
 # %%
 prompt_file = ResultsFile(
     "prompt",
