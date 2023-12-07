@@ -244,7 +244,7 @@ class AblationHook:
     def position(self):
         assert self.all_positions is False
         assert self.pos_mask.sum() == 1
-        return self.pos_mask.argmax(dim=1)
+        return self.pos_mask.float().argmax(dim=1)
 
     def __enter__(self):
         for layer in self.layers_to_ablate:
