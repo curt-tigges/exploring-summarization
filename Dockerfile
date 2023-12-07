@@ -35,3 +35,4 @@ RUN pip install dill==0.3.4
 RUN pip install jupyter ipykernel pytest pytest-doctestplus nbval pytest-cov
 RUN pip install git+https://github.com/neelnanda-io/neel-plotly.git
 RUN pip install --upgrade jax jaxlib
+RUN pip install sparse_autoencoder
