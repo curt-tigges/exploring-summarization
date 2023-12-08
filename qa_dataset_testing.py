@@ -81,7 +81,7 @@ dataset = ds.map(format_questions)
 # %%
 from transformers import AutoTokenizer
 
-model_checkpoint = "EleutherAI/pythia-410m"  # or any other appropriate small model
+model_checkpoint = "EleutherAI/pythia-160m"
 tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
 tokenizer.pad_token = tokenizer.decode([1])
 torch.set_grad_enabled(True)
@@ -129,23 +129,33 @@ tokenized_datasets.set_format(type="torch", columns=["input_ids", "labels"])
 tokenized_datasets['train'][0]['input_ids'].shape, tokenized_datasets['train'][0]['labels'].shape
 
 
+# %% [markdown]
+# ### Fine-Tune
+
+# %%
+torch.set_grad_enabled(True)
+
+# %%
+# from transformers import AutoModelForCausalLM
+# #load model from results folder
+# model = AutoModelForCausalLM.from_pretrained('results').to('cuda')
+
 # %%
 from transformers import AutoModelForCausalLM
-torch.set_grad_enabled(True)
-#load model from results folder
-model = AutoModelForCausalLM.from_pretrained('results')
+model = AutoModelForCausalLM.from_pretrained("results/checkpoint-350000").to('cuda')
 
 # %%
 from transformers import Trainer, TrainingArguments
 
 training_args = TrainingArguments(
-    output_dir="./results",
+    output_dir="./pythia-410m-results",
     evaluation_strategy="epoch",
     save_strategy="epoch",
     learning_rate=2e-5,
-    per_device_train_batch_size=40,
-    per_device_eval_batch_size=40,
-    num_train_epochs=7,
+    #bf16=True,
+    per_device_train_batch_size=80,
+    per_device_eval_batch_size=80,
+    num_train_epochs=3,
     weight_decay=0.01,
 )
 
@@ -161,6 +171,7 @@ trainer.train()
 
 # %%
 from datasets import load_metric
+from tqdm.notebook import tqdm
 
 # Load your model and tokenizer
 #model = AutoModelForCausalLM.from_pretrained(model_checkpoint)
@@ -175,7 +186,7 @@ def evaluate(model, tokenizer, dataset):
     correct_predictions = 0
     total_predictions = 0
 
-    for example in dataset:
+    for example in tqdm(dataset, total=len(dataset)):
         inputs = tokenizer(example["prompt"], return_tensors="pt", padding="max_length", truncation=True, max_length=512)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
