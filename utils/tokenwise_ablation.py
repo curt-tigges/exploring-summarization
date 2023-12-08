@@ -217,7 +217,7 @@ class AblationHook:
         self,
         model: HookedTransformer,
         pos_mask: Int[Tensor, "batch pos"],
-        layers_to_ablate: List[int] | Literal["all"] = "all",
+        layers_to_ablate: int | List[int] | Literal["all"] = "all",
         cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
         direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
         multiplier: float = 1.0,
@@ -226,6 +226,8 @@ class AblationHook:
     ):
         if layers_to_ablate == "all":
             layers_to_ablate = list(range(model.cfg.n_layers))
+        if isinstance(layers_to_ablate, int):
+            layers_to_ablate = [layers_to_ablate]
         self.model = model
         self.layers_to_ablate = layers_to_ablate
         self.pos_mask = pos_mask
@@ -234,6 +236,15 @@ class AblationHook:
         self.multiplier = multiplier
         self.all_positions = all_positions
         self.device = device
+
+    def layer(self):
+        assert len(self.layers_to_ablate) == 1
+        return self.layers_to_ablate[0]
+
+    def position(self):
+        assert self.all_positions is False
+        assert self.pos_mask.sum() == 1
+        return self.pos_mask.float().argmax(dim=1)
 
     def __enter__(self):
         for layer in self.layers_to_ablate:
@@ -250,6 +261,51 @@ class AblationHook:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.model.reset_hooks()
+
+
+class AblationHookIterator:
+    def __init__(
+        self,
+        model: HookedTransformer,
+        tokens: Int[Tensor, "batch pos"],
+        positions: List[int] | Literal["all"] = "all",
+        layers_to_ablate: List[int] | Literal["all"] = "all",
+        cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
+        direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
+        multiplier: float = 1.0,
+        all_positions: bool = False,
+        device: torch.device = DEFAULT_DEVICE,
+    ) -> None:
+        if layers_to_ablate == "all":
+            layers_to_ablate = list(range(model.cfg.n_layers))
+        if isinstance(layers_to_ablate, int):
+            layers_to_ablate = [layers_to_ablate]
+        if positions == "all":
+            positions = list(range(tokens.shape[1]))
+        if cached_means is None and direction_vectors is None:
+            cached_means = torch.zeros(
+                (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
+            )
+        self.hooks = []
+        for layer in layers_to_ablate:
+            for pos in positions:
+                ablation_mask = torch.zeros_like(tokens, dtype=torch.bool)
+                ablation_mask[:, pos] = True
+                self.hooks.append(
+                    AblationHook(
+                        model,
+                        ablation_mask,
+                        layer,
+                        cached_means,
+                        direction_vectors,
+                        multiplier,
+                        all_positions,
+                        device,
+                    )
+                )
+
+    def __iter__(self):
+        return iter(self.hooks)
 
 
 # -------------------- LOSS UTILS --------------------
