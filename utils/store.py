@@ -3,7 +3,7 @@ import pandas as pd
 import glob
 import os
 from transformer_lens import HookedTransformer
-from typing import Iterable, Union
+from typing import Iterable, List, Union
 import torch
 import plotly.graph_objects as go
 from circuitsvis.utils.render import RenderedHTML
@@ -153,6 +153,61 @@ def create_file_name(name: str, extension: str, **kwargs):
     extension = extension.replace(".", "")
     file_name = args_to_file_name(**kwargs)
     return f"{name}_{file_name}.{extension}"
+
+
+class TensorBlockManager:
+    def __init__(
+        self,
+        block_size,
+        tensor_prefix: str = "tensor_block",
+        root: str = "results/cache",
+    ):
+        self.block_size = block_size
+        self.tensor_prefix = tensor_prefix
+        self.root = root
+
+    def _get_filename(self, block_index: int):
+        return f"{self.root}/{self.tensor_prefix}_{block_index}.pt"
+
+    def _get_block_and_index(self, index: int):
+        block_index = index // self.block_size
+        index_in_block = index % self.block_size
+        return block_index, index_in_block
+
+    def save(self, block: torch.Tensor, block_index: int):
+        filename = self._get_filename(block_index)
+        torch.save(block, filename)
+
+    def read(self, indices: List[int]):
+        blocks_and_indices = [self._get_block_and_index(idx) for idx in indices]
+        # group by block
+        block_indices = {}
+        for block_id, index in blocks_and_indices:
+            if block_id not in block_indices:
+                block_indices[block_id] = []
+            block_indices[block_id].append(index)
+        # load blocks and get slices
+        slices = []
+        for block_id, index_list in block_indices.items():
+            block = torch.load(self._get_filename(block_id))
+            slices += [block[idx] for idx in index_list]
+
+        # Concatenate all slices
+        full_slice = torch.cat(slices, dim=0)
+        return full_slice
+
+    def clear(self):
+        for filename in glob.glob(f"{self.root}/{self.tensor_prefix}_*.pt"):
+            os.remove(filename)
+
+    def delete(self, block_index):
+        filename = self._get_filename(block_index)
+        os.remove(filename)
+
+    def __len__(self):
+        return (
+            len(glob.glob(f"{self.root}/{self.tensor_prefix}_*.pt")) * self.block_size
+        )
 
 
 class ResultsFile:
