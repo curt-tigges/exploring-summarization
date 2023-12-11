@@ -92,7 +92,7 @@ for batch in tqdm(dataloader):
     )
     to_append = flattened_residual_stream[is_token]
     to_append = to_append[: min(BUFFER_SIZE - buffer_idx, len(to_append))]
-    buffer[buffer_idx : buffer_idx + len(to_append)] = to_append
+    buffer[buffer_idx : buffer_idx + len(to_append)] = to_append.cpu()
     buffer_idx += len(to_append)
     if buffer_idx >= BUFFER_SIZE:
         manager.save(buffer, block)
