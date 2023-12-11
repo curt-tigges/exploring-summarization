@@ -158,7 +158,7 @@ def create_file_name(name: str, extension: str, **kwargs):
 class TensorBlockManager:
     def __init__(
         self,
-        block_size,
+        block_size: int,
         tensor_prefix: str = "tensor_block",
         root: str = "results/cache",
     ):
@@ -178,7 +178,11 @@ class TensorBlockManager:
         filename = self._get_filename(block_index)
         torch.save(block, filename)
 
-    def read(self, indices: List[int]):
+    def load(self, block_index: int):
+        filename = self._get_filename(block_index)
+        return torch.load(filename)
+
+    def slice_indices(self, indices: List[int]):
         blocks_and_indices = [self._get_block_and_index(idx) for idx in indices]
         # group by block
         block_indices = {}
@@ -189,15 +193,21 @@ class TensorBlockManager:
         # load blocks and get slices
         slices = []
         for block_id, index_list in block_indices.items():
-            block = torch.load(self._get_filename(block_id))
+            block = self.load(block_id)
             slices += [block[idx] for idx in index_list]
 
         # Concatenate all slices
         full_slice = torch.cat(slices, dim=0)
         return full_slice
 
+    def list(self):
+        return glob.glob(f"{self.root}/{self.tensor_prefix}_*.pt")
+
+    def read_all(self):
+        return (torch.load(filename) for filename in self.list())
+
     def clear(self):
-        for filename in glob.glob(f"{self.root}/{self.tensor_prefix}_*.pt"):
+        for filename in self.list():
             os.remove(filename)
 
     def delete(self, block_index):
@@ -205,9 +215,7 @@ class TensorBlockManager:
         os.remove(filename)
 
     def __len__(self):
-        return (
-            len(glob.glob(f"{self.root}/{self.tensor_prefix}_*.pt")) * self.block_size
-        )
+        return len(self.list())
 
 
 class ResultsFile:
