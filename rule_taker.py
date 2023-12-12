@@ -1,4 +1,6 @@
 # %%
+import itertools
+import random
 import einops
 from functools import partial
 import numpy as np
@@ -60,10 +62,11 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA_DSA"] = "1"
 torch.set_grad_enabled(False)
 torch.manual_seed(0)
+random.seed(0)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # %%
 model = HookedTransformer.from_pretrained(
-    "mistralai/Mistral-7B-Instruct-v0.1",
+    "mistral-7b-instruct",
     torch_dtype=torch.bfloat16,
     fold_ln=False,
     center_writing_weights=False,
@@ -72,170 +75,261 @@ model = HookedTransformer.from_pretrained(
 model = model.to(device)
 assert model.tokenizer is not None
 # %%
-DATASET = [
-    (
-        "Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is loud. True or False: is Anne smart?",
-        "False",
-        "Anne is loud. Anne is not young. Anne is sleepy. Anne is smart if she is loud. True or False: is Anne smart?",
-        "True",
-    ),
-    (
-        "Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is old and quiet. True or False: is Anne smart?",
-        "True",
-        "Anne is loud. Anne is not young. Anne is sleepy. Anne is smart if she is old and quiet. True or False: is Anne smart?",
-        "False",
-    ),
-    (
-        "Bob is fast. Bob is not tall. Bob is happy. Bob is strong if he is not fast. True or False: is Bob strong?",
-        "False",
-        "Bob is slow. Bob is not tall. Bob is happy. Bob is strong if he is not fast. True or False: is Bob strong?",
-        "True",
-    ),
-    (
-        "Carol is tall. Carol is fat. Carol is tired. Carol is clever if she is thin and tall. True or False: is Carol clever?",
-        "False",
-        "Carol is tall. Carol is thin. Carol is tired. Carol is clever if she is thin and tall. True or False: is Carol clever?",
-        "True",
-    ),
-    (
-        "David is young. David is not weak. David is sad. David is wise if he is old and sad. True or False: is David wise?",
-        "False",
-        "David is old. David is not weak. David is sad. David is wise if he is old and sad. True or False: is David wise?",
-        "True",
-    ),
-    (
-        "Emma is funny. Emma is not short. Emma is cheerful. Emma is kind if she is not funny. True or False: is Emma kind?",
-        "False",
-        "Emma is serious. Emma is not short. Emma is cheerful. Emma is kind if she is not funny. True or False: is Emma kind?",
-        "True",
-    ),
-    (
-        "Mike is happy and young. Mike is short. Mike is clever if he is young XOR tall. True or False: is Mike clever?",
-        "False",
-        "Mike is happy and old. Mike is tall. Mike is clever if he is young XOR tall. True or False: is Mike clever?",
-        "True",
-    ),
-    (
-        "Sarah is friendly and smart. Sarah is slow. Sarah is wise if she is smart AND fast. True or False: is Sarah wise?",
-        "False",
-        "Sarah is friendly and smart. Sarah is fast. Sarah is wise if she is smart AND fast. True or False: is Sarah wise?",
-        "True",
-    ),
-    (
-        "John is strong and not agile. John is young. John is skilled if he is strong XOR agile. True or False: is John skilled?",
-        "True",
-        "John is weak and not agile. John is young. John is skilled if he is strong XOR agile. True or False: is John skilled?",
-        "False",
-    ),
-    (
-        "Emma is strong and not agile. Emma is young. Emma is skilled if he is strong XOR agile. True or False: is Emma skilled?",
-        "True",
-        "Emma is strong and not young. Emma is agile. Emma is skilled if he is strong XOR agile. True or False: is Emma skilled?",
-        "False",
-    ),
-    (
-        "Lucy is kind and honest. Lucy is not cheerful. Lucy is beloved if she is kind AND cheerful. True or False: is Lucy beloved?",
-        "False",
-        "Lucy is kind and cheerful. Lucy is not honest. Lucy is beloved if she is kind AND cheerful. True or False: is Lucy beloved?",
-        "True",
-    ),
-    (
-        "Tom is brave and dumb. Tom is old. Tom is respected if he is brave XOR wise. True or False: is Tom respected?",
-        "True",
-        "Tom is brave and wise. Tom is old. Tom is respected if he is brave XOR wise. True or False: is Tom respected?",
-        "False",
-    ),
-    (
-        "Emma is calm and thoughtful. Emma is sad. Emma is admired if she is calm AND happy. True or False: is Emma admired?",
-        "False",
-        "Emma is calm and happy. Emma is thoughtful. Emma is admired if she is calm AND happy. True or False: is Emma admired?",
-        "True",
-    ),
-    # (
-    #     "Alex is energetic and impatient. Alex is young. Alex is successful if he is energetic XOR patient. True or False: is Alex successful?",
-    #     "True",
-    #     "Alex is energetic and patient. Alex is young. Alex is successful if he is energetic XOR patient. True or False: is Alex successful?",
-    #     "False",
-    # ),
-    (
-        "Linda is creative and intelligent. Linda is not enthusiastic. Linda is accomplished if she is creative AND enthusiastic. True or False: is Linda accomplished?",
-        "False",
-        "Linda is creative and enthusiastic. Linda is not intelligent. Linda is accomplished if she is creative AND enthusiastic. True or False: is Linda accomplished?",
-        "True",
-    ),
-    # (
-    #     "Peter is friendly and introverted. Peter is smart. Peter is popular if he is friendly XOR outgoing. True or False: is Peter popular?",
-    #     "True",
-    #     "Peter is friendly and outgoing. Peter is smart. Peter is popular if he is friendly XOR outgoing. True or False: is Peter popular?",
-    #     "False",
-    # ),
-    (
-        "Rachel is diligent and focused. Rachel is uncomfortable. Rachel is efficient if she is diligent AND relaxed. True or False: is Rachel efficient?",
-        "False",
-        "Rachel is diligent and relaxed. Rachel is focused. Rachel is efficient if she is diligent AND relaxed. True or False: is Rachel efficient?",
-        "True",
-    ),
-    # (
-    #     "Henry is curious and alert. Henry is playful. Henry is creative if he is curious OR playful. True or False: is Henry creative?",
-    #     "True",
-    #     "Henry is sleepy and playful. Henry is curious. Henry is creative if he is curious OR playful. True or False: is Henry creative?",
-    #     "False",
-    # ),
-    (
-        "Alice is energetic and not friendly. Alice is serious. Alice is sociable if she is friendly OR energetic. True or False: is Alice sociable?",
-        "True",
-        "Alice is serious and not energetic. Alice is friendly. Alice is sociable if she is friendly OR energetic. True or False: is Alice sociable?",
-        "False",
-    ),
-    (
-        "George is tall and strong. George is not fast. George is athletic if he is fast OR strong. True or False: is George athletic?",
-        "True",
-        "George is short and weak. George is not fast. George is athletic if he is fast OR strong. True or False: is George athletic?",
-        "False",
-    ),
-    (
-        "Mia is creative and not organized. Mia is not thoughtful. Mia is resourceful if she is organized OR creative. True or False: is Mia resourceful?",
-        "True",
-        "Mia is thoughtful and not creative. Mia is not organized. Mia is resourceful if she is organized OR creative. True or False: is Mia resourceful?",
-        "False",
-    ),
-    (
-        "Oliver is careful and not friendly. Oliver is not outgoing. Oliver is approachable if he is outgoing OR friendly. True or False: is Oliver approachable?",
-        "False",
-        "Oliver is friendly and not careful. Oliver is not outgoing. Oliver is approachable if he is outgoing OR friendly. True or False: is Oliver approachable?",
-        "True",
-    ),
-    # (
-    #     "Sophie is patient and not calm. Sophie is kind. Sophie is reassuring if she is calm OR patient. True or False: is Sophie reassuring?",
-    #     "True",
-    #     "Sophie is impatient and not calm. Sophie is kind. Sophie is reassuring if she is calm OR patient. True or False: is Sophie reassuring?",
-    #     "False",
-    # ),
-    (
-        "Sam is witty and not dumb. Sam is not humorous. Sam is charming if he is humorous OR witty. True or False: is Sam charming?",
-        "True",
-        "Sam is dumb and not humorous. Sam is not witty. Sam is charming if he is humorous OR witty. True or False: is Sam charming?",
-        "False",
-    ),
-    # (
-    #     "Jane is pretty and enthusiastic. Jane is not focused. Jane is productive if she is focused OR enthusiastic. True or False: is Jane productive?",
-    #     "True",
-    #     "Jane is pretty and distracted. Jane is not enthusiastic. Jane is productive if she is focused OR enthusiastic. True or False: is Jane productive?",
-    #     "False",
-    # ),
-    (
-        "Josh is risky and not strong. Josh is cautious. Josh is daring if he is strong OR risky. True or False: is Josh daring?",
-        "True",
-        "Josh is weak and not risky. Josh is cautious. Josh is daring if he is strong OR risky. True or False: is Josh daring?",
-        "False",
-    ),
-    # (
-    #     "Grace is cheerful and optimistic. Grace is not lively. Grace is pleasant if she is lively OR cheerful. True or False: is Grace pleasant?",
-    #     "True",
-    #     "Grace is sad and lifeless. Grace is not cheerful. Grace is pleasant if she is lively OR cheerful. True or False: is Grace pleasant?",
-    #     "False",
-    # ),
+PREFIX = (
+    "[INST] Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: No\n"
+    "Question: Anne is loud. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: Yes\n"
+    "Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is old and quiet. Is Anne smart? Answer: Yes\n"
+    "Question: "
+)
+SUFFIX = " Answer: [/INST]"
+PROMPT_TEMPLATE = "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
+NAMES = [
+    "Anne",
+    "Bob",
+    "Carol",
+    "David",
+    "Emma",
+    "Mike",
+    "Sarah",
+    "John",
+    "Linda",
+    "Peter",
+    "Grace",
+    "Oliver",
+    "Sophie",
+    "Josh",
+    "Mia",
+    "Tom",
+    "Rachel",
+    "Henry",
+    "Alice",
+    "George",
 ]
+POSITIVE_ATTRIBUTES = [
+    "loud",
+    "fast",
+    "tall",
+    "fat",
+    "young",
+    "strong",
+    "smart",
+    "happy",
+    "kind",
+    "funny",
+    "curious",
+    "calm",
+    "pretty",
+]
+NEGATIVE_ATTRIBUTES = [
+    "quiet",
+    "slow",
+    "short",
+    "thin",
+    "old",
+    "weak",
+    "dumb",
+    "sad",
+    "mean",
+    "serious",
+    "dull",
+    "nervous",
+    "ugly",
+]
+OPERATORS = [
+    "and",
+    "or",
+]
+
+
+# %%
+def get_attribute_sign_and_index(attr: str) -> Tuple[bool, int]:
+    if attr in POSITIVE_ATTRIBUTES:
+        return True, POSITIVE_ATTRIBUTES.index(attr)
+    elif attr in NEGATIVE_ATTRIBUTES:
+        return False, NEGATIVE_ATTRIBUTES.index(attr)
+    else:
+        raise ValueError(f"Unknown attribute {attr}")
+
+
+# %%
+def get_answers_for_prompt_tuples(
+    prompt_tuples: List[Tuple[str, str, str, str, str, str, str]]
+) -> List[str]:
+    answers = []
+    for _, attr1, attr2, attr3, attr_l, operator, attr_r in prompt_tuples:
+        attr1_sign, attr1_idx = get_attribute_sign_and_index(attr1)
+        attr2_sign, attr2_idx = get_attribute_sign_and_index(attr2)
+        attr3_sign, attr3_idx = get_attribute_sign_and_index(attr3)
+        _, attr_l_idx = get_attribute_sign_and_index(attr_l)
+        _, attr_r_idx = get_attribute_sign_and_index(attr_r)
+        if operator == "and":
+            if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
+                answer = attr1_sign and attr2_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign and attr2_sign
+            elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
+                answer = attr1_sign and attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign and attr3_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
+                answer = attr2_sign and attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
+                answer = attr2_sign and attr3_sign
+            else:
+                raise ValueError(
+                    f"Invalid combination of attributes {attr_l} and {attr_r}"
+                )
+        elif operator == "or":
+            if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
+                answer = attr1_sign or attr2_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign or attr2_sign
+            elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
+                answer = attr1_sign or attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign or attr3_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
+                answer = attr2_sign or attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
+                answer = attr2_sign or attr3_sign
+            else:
+                raise ValueError(
+                    f"Invalid combination of attributes {attr_l} and {attr_r}"
+                )
+        else:
+            raise ValueError(f"Unknown operator {operator}")
+        answers.append("Yes" if answer else "No")
+    return answers
+
+
+# %%
+def get_counterfactual_tuples(
+    prompt_tuples: List[Tuple[str, str, str, str, str, str, str]], seed: int = 0
+) -> List[Tuple[str, str, str, str, str, str, str]]:
+    random.seed(seed)
+    cf_tuples = []
+    for name, attr1, attr2, attr3, attr_l, operator, attr_r in prompt_tuples:
+        idx_to_change = random.choice([0, 1, 2])
+        attr_sign, attr_idx = get_attribute_sign_and_index(
+            [attr1, attr2, attr3][idx_to_change]
+        )
+        cf_attr = (
+            POSITIVE_ATTRIBUTES[attr_idx]
+            if not attr_sign
+            else NEGATIVE_ATTRIBUTES[attr_idx]
+        )
+        cf_attr1, cf_attr2, cf_attr3 = (
+            cf_attr if idx_to_change == 0 else attr1,
+            cf_attr if idx_to_change == 1 else attr2,
+            cf_attr if idx_to_change == 2 else attr3,
+        )
+        cf_tuples.append((name, cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r))
+    return cf_tuples
+
+
+# %%
+PROMPT_TUPLES = [
+    (
+        name,
+        attr1_list[attr1_idx],
+        attr2_list[attr2_idx],
+        attr3_list[attr3_idx],
+        attr_l,
+        operator,
+        attr_r,
+    )
+    for name in NAMES
+    for operator in OPERATORS
+    for attr1_idx, attr2_idx, attr3_idx in itertools.combinations(
+        range(len(POSITIVE_ATTRIBUTES)), 3
+    )
+    for attr1_list in [POSITIVE_ATTRIBUTES, NEGATIVE_ATTRIBUTES]
+    for attr2_list in [POSITIVE_ATTRIBUTES, NEGATIVE_ATTRIBUTES]
+    for attr3_list in [POSITIVE_ATTRIBUTES, NEGATIVE_ATTRIBUTES]
+    for attr_l, attr_r in [
+        (POSITIVE_ATTRIBUTES[attr1_idx], POSITIVE_ATTRIBUTES[attr2_idx]),
+        (POSITIVE_ATTRIBUTES[attr2_idx], POSITIVE_ATTRIBUTES[attr1_idx]),
+        (POSITIVE_ATTRIBUTES[attr1_idx], POSITIVE_ATTRIBUTES[attr3_idx]),
+        (POSITIVE_ATTRIBUTES[attr3_idx], POSITIVE_ATTRIBUTES[attr1_idx]),
+        (POSITIVE_ATTRIBUTES[attr2_idx], POSITIVE_ATTRIBUTES[attr3_idx]),
+        (POSITIVE_ATTRIBUTES[attr3_idx], POSITIVE_ATTRIBUTES[attr2_idx]),
+    ]
+]
+random.shuffle(PROMPT_TUPLES)
+PROMPT_TUPLES = PROMPT_TUPLES[:1000]
+PROMPTS = [
+    PROMPT_TEMPLATE.format(
+        NAME=name,
+        ATTR1=attr1,
+        ATTR2=attr2,
+        ATTR3=attr3,
+        ATTR_L=attr_l,
+        OPERATOR=operator,
+        ATTR_R=attr_r,
+    )
+    for name, attr1, attr2, attr3, attr_l, operator, attr_r in PROMPT_TUPLES
+]
+CF_TUPLES = get_counterfactual_tuples(PROMPT_TUPLES)
+CF_PROMPTS = [
+    PROMPT_TEMPLATE.format(
+        NAME=name,
+        ATTR1=attr1,
+        ATTR2=attr2,
+        ATTR3=attr3,
+        ATTR_L=attr_l,
+        OPERATOR=operator,
+        ATTR_R=attr_r,
+    )
+    for name, attr1, attr2, attr3, attr_l, operator, attr_r in CF_TUPLES
+]
+ANSWERS = get_answers_for_prompt_tuples(PROMPT_TUPLES)
+CF_ANSWERS = get_answers_for_prompt_tuples(CF_TUPLES)
+to_keep = [answer != cf_answer for answer, cf_answer in zip(ANSWERS, CF_ANSWERS)]
+PROMPTS = [p for p, keep in zip(PROMPTS, to_keep) if keep]
+CF_PROMPTS = [p for p, keep in zip(CF_PROMPTS, to_keep) if keep]
+ANSWERS = [a for a, keep in zip(ANSWERS, to_keep) if keep]
+CF_ANSWERS = [a for a, keep in zip(CF_ANSWERS, to_keep) if keep]
+PROMPTS = PROMPTS[:100]
+CF_PROMPTS = CF_PROMPTS[:100]
+ANSWERS = ANSWERS[:100]
+CF_ANSWERS = CF_ANSWERS[:100]
+
+# %%
+PREPEND_SPACE_TO_ANSWER = False
+# %%
+for prompt, cf_prompt in zip(PROMPTS, CF_PROMPTS):
+    prompt_str_tokens = model.to_str_tokens(prompt)
+    cf_str_tokens = model.to_str_tokens(cf_prompt)
+    assert len(prompt_str_tokens) == len(cf_str_tokens), (
+        f"Prompt and counterfactual prompt must have the same length, "
+        f"for prompt \n{prompt_str_tokens} \n and counterfactual\n{cf_str_tokens} \n"
+        f"got {len(prompt_str_tokens)} and {len(cf_str_tokens)}"
+    )
+# %%
+i = 0
+for prompt, answer, cf_prompt, cf_answer in zip(
+    PROMPTS, ANSWERS, CF_PROMPTS, CF_ANSWERS
+):
+    print(prompt)
+    test_prompt(
+        PREFIX + prompt + SUFFIX,
+        answer,
+        model,
+        top_k=10,
+        prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
+    )
+    print(cf_prompt)
+    test_prompt(
+        PREFIX + cf_prompt + SUFFIX,
+        cf_answer,
+        model,
+        top_k=10,
+        prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
+    )
+    i += 2
+    if i > 10:
+        break
+# %%
 # %%
 for prompt, answer, cf_prompt, cf_answer in DATASET:
     prompt_str_tokens = model.to_str_tokens(prompt)
@@ -246,54 +340,60 @@ for prompt, answer, cf_prompt, cf_answer in DATASET:
         f"got {len(prompt_str_tokens)} and {len(cf_str_tokens)}"
     )
 # %%
-test_prompt(
-    "[INST] Anne is not loud. Anne is not young. Anne is sleepy. Anne is smart if she is loud. True or False: is Anne smart? [/INST]",
-    "False",
-    model,
-    top_k=10,
-    prepend_space_to_answer=False,
-)
-# %%
-for test_idx in range(1):
+
+for test_idx in range(len(DATASET)):
     test_prompt(
-        "[INST] " + DATASET[test_idx][0] + " [/INST]",
+        PREFIX + DATASET[test_idx][0] + SUFFIX,
         DATASET[test_idx][1],
         model,
         top_k=10,
-        prepend_space_to_answer=False,
+        prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
     )
 # %%
 model.tokenizer.padding_side = "left"
-all_tokens = model.to_tokens([d[0] for d in DATASET], prepend_bos=True)
+all_tokens = model.to_tokens(
+    [PREFIX + d[0] + SUFFIX for d in DATASET], prepend_bos=True
+)
 attention_mask = get_attention_mask(model.tokenizer, all_tokens, prepend_bos=False)
+answer_prefix = " " if PREPEND_SPACE_TO_ANSWER else ""
 answer_tokens = torch.tensor(
-    [(model.to_single_token(d[1]), model.to_single_token(d[3])) for d in DATASET],
+    [
+        (
+            model.to_single_token(answer_prefix + d[1]),
+            model.to_single_token(answer_prefix + d[3]),
+        )
+        for d in DATASET
+    ],
     device=device,
     dtype=torch.int64,
 )
-cf_tokens = model.to_tokens([d[2] for d in DATASET], prepend_bos=True)
+pct_true = (answer_tokens[:, 0] == answer_tokens[0, 0]).float().mean().item()
+cf_tokens = model.to_tokens([PREFIX + d[2] + SUFFIX for d in DATASET], prepend_bos=True)
 assert all_tokens.shape == cf_tokens.shape
 assert (all_tokens == model.tokenizer.pad_token_id).sum() == (
     cf_tokens == model.tokenizer.pad_token_id
 ).sum()
+assert np.isclose(pct_true, 0.5)
 print(all_tokens.shape, answer_tokens.shape)
 # %%
+CENTERED = False
 all_logits: Float[Tensor, "batch pos d_vocab"] = model(
     all_tokens, prepend_bos=False, return_type="logits", attention_mask=attention_mask
 )
 all_logit_diffs = get_logit_diff(
     all_logits, answer_tokens=answer_tokens, per_prompt=True
 )
+if CENTERED:
+    all_logit_diffs -= all_logit_diffs.mean()
 print(all_logit_diffs)
 # %%
 cf_logits: Float[Tensor, "batch pos d_vocab"] = model(
     cf_tokens, prepend_bos=False, return_type="logits", attention_mask=attention_mask
 )
 cf_logit_diffs = get_logit_diff(cf_logits, answer_tokens=answer_tokens, per_prompt=True)
+if CENTERED:
+    cf_logit_diffs -= cf_logit_diffs.mean()
 print(cf_logit_diffs)
-# %%
-print(f"Original mean logit diff: {all_logit_diffs.mean():.2f}")
-print(f"Counterfactual mean logit diff: {cf_logit_diffs.mean():.2f}")
 # %%
 print(f"Original accuracy: {(all_logit_diffs > 0).float().mean():.2f}")
 print(f"Counterfactual accuracy: {(cf_logit_diffs < 0).float().mean():.2f}")
