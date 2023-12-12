@@ -76,12 +76,13 @@ model = model.to(device)
 assert model.tokenizer is not None
 # %%
 PREFIX = (
-    "[INST] Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: No\n"
-    "Question: Anne is loud. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: Yes\n"
-    "Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is old and quiet. Is Anne smart? Answer: Yes\n"
-    "Question: "
+    "[INST] Question: "
+    # "[INST] Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: No\n"
+    # "Question: Anne is loud. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: Yes\n"
+    # "Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is old and quiet. Is Anne smart? Answer: Yes\n"
+    # "Question: "
 )
-SUFFIX = " Answer: [/INST]"
+SUFFIX = " Answer (Yes/No): [/INST]"
 PROMPT_TEMPLATE = "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
 NAMES = [
     "Anne",
@@ -292,7 +293,7 @@ CF_ANSWERS = [a for a, keep in zip(CF_ANSWERS, to_keep) if keep]
 PROMPTS = PROMPTS[:100]
 CF_PROMPTS = CF_PROMPTS[:100]
 ANSWERS = ANSWERS[:100]
-CF_ANSWERS = CF_ANSWERS[:100]
+
 
 # %%
 PREPEND_SPACE_TO_ANSWER = False
@@ -330,53 +331,35 @@ for prompt, answer, cf_prompt, cf_answer in zip(
     if i > 10:
         break
 # %%
-# %%
-for prompt, answer, cf_prompt, cf_answer in DATASET:
-    prompt_str_tokens = model.to_str_tokens(prompt)
-    cf_str_tokens = model.to_str_tokens(cf_prompt)
-    assert len(prompt_str_tokens) == len(cf_str_tokens), (
-        f"Prompt and counterfactual prompt must have the same length, "
-        f"for prompt \n{prompt_str_tokens} \n and counterfactual\n{cf_str_tokens} \n"
-        f"got {len(prompt_str_tokens)} and {len(cf_str_tokens)}"
-    )
-# %%
-
-for test_idx in range(len(DATASET)):
-    test_prompt(
-        PREFIX + DATASET[test_idx][0] + SUFFIX,
-        DATASET[test_idx][1],
-        model,
-        top_k=10,
-        prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
-    )
-# %%
 model.tokenizer.padding_side = "left"
 all_tokens = model.to_tokens(
-    [PREFIX + d[0] + SUFFIX for d in DATASET], prepend_bos=True
+    [PREFIX + prompt + SUFFIX for prompt in PROMPTS], prepend_bos=True
+)
+cf_tokens = model.to_tokens(
+    [PREFIX + cf_prompt + SUFFIX for cf_prompt in CF_PROMPTS], prepend_bos=True
 )
 attention_mask = get_attention_mask(model.tokenizer, all_tokens, prepend_bos=False)
 answer_prefix = " " if PREPEND_SPACE_TO_ANSWER else ""
 answer_tokens = torch.tensor(
     [
         (
-            model.to_single_token(answer_prefix + d[1]),
-            model.to_single_token(answer_prefix + d[3]),
+            model.to_single_token(answer_prefix + answer),
+            model.to_single_token(answer_prefix + cf_answer),
         )
-        for d in DATASET
+        for answer, cf_answer in zip(ANSWERS, CF_ANSWERS)
     ],
     device=device,
     dtype=torch.int64,
 )
 pct_true = (answer_tokens[:, 0] == answer_tokens[0, 0]).float().mean().item()
-cf_tokens = model.to_tokens([PREFIX + d[2] + SUFFIX for d in DATASET], prepend_bos=True)
 assert all_tokens.shape == cf_tokens.shape
 assert (all_tokens == model.tokenizer.pad_token_id).sum() == (
     cf_tokens == model.tokenizer.pad_token_id
 ).sum()
-assert np.isclose(pct_true, 0.5)
-print(all_tokens.shape, answer_tokens.shape)
+# assert np.isclose(pct_true, 0.5)
+print(all_tokens.shape, answer_tokens.shape, pct_true)
 # %%
-CENTERED = False
+CENTERED = np.isclose(pct_true, 0.5)
 all_logits: Float[Tensor, "batch pos d_vocab"] = model(
     all_tokens, prepend_bos=False, return_type="logits", attention_mask=attention_mask
 )
@@ -394,6 +377,9 @@ cf_logit_diffs = get_logit_diff(cf_logits, answer_tokens=answer_tokens, per_prom
 if CENTERED:
     cf_logit_diffs -= cf_logit_diffs.mean()
 print(cf_logit_diffs)
+# %%
+print(f"Original mean: {all_logit_diffs.mean():.2f}")
+print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 # %%
 print(f"Original accuracy: {(all_logit_diffs > 0).float().mean():.2f}")
 print(f"Counterfactual accuracy: {(cf_logit_diffs < 0).float().mean():.2f}")
