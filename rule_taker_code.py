@@ -12,8 +12,8 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from datasets import load_dataset, concatenate_datasets
 from jaxtyping import Float, Int, Bool
-from typing import Dict, Iterable, List, Tuple, Union, Literal, Optional
-from transformer_lens import HookedTransformer
+from typing import Callable, Dict, Iterable, List, Tuple, Union, Literal, Optional
+from transformer_lens import ActivationCache, HookedTransformer
 from transformer_lens.utils import (
     get_dataset,
     tokenize_and_concatenate,
@@ -54,7 +54,14 @@ from utils.datasets import (
 )
 from utils.neuroscope import plot_top_onesided
 from utils.store import ResultsFile, TensorBlockManager
-from utils.path_patching import act_patch, Node, IterNode, IterSeqPos
+from utils.path_patching import (
+    act_patch,
+    Node,
+    IterNode,
+    IterSeqPos,
+    _act_patch_single,
+    get_batch_and_seq_pos_indices,
+)
 
 # %%
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -66,28 +73,28 @@ random.seed(0)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # %%
 model = HookedTransformer.from_pretrained(
-    "santacoder",
+    "pythia-2.8b",
     torch_dtype=torch.float32,
     fold_ln=False,
     center_writing_weights=False,
     center_unembed=False,
+    device=device,
 )
-model = model.to(device)
 assert model.tokenizer is not None
 # %%
 PREPEND_SPACE_TO_ANSWER = False
 CODE_DATASET = [
     (
-        "def count_words(string: str) -> int:\n    return len(string.",
-        "split",
-        "def count_lines(string: str) -> int:\n    return len(string.",
-        "splitlines",
+        "def count_words(string: str) -> int:\n    return len(string.split",
+        "())",
+        "def count_lines(string: str) -> int:\n    return len(string.split",
+        "lines",
     ),
     (
-        "def reverseorder_string(string: str) -> str:\n    return string",
-        "[::-",
-        "def halve_string(string: str) -> str:\n    return string",
-        "[:",
+        "def reverse_string(string: str) -> str:\n    return string[",
+        "::",
+        "def first_half(string: str) -> str:\n    return string[",
+        "0",
     ),
     (
         "def is_uppercase(string: str) -> bool:\n    return string.is",
@@ -95,14 +102,14 @@ CODE_DATASET = [
         "def is_lowercase(string: str) -> bool:\n    return string.is",
         "lower",
     ),
+    # (
+    #     "def convert_to_Celsius(temp: float) -> float:\n    return (temp",
+    #     " -",
+    #     "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+    #     " *",
+    # ),
     (
-        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
-        " -",
-        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
-        " *",
-    ),
-    (
-        "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        "def _factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
         " n",
         "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
         " fib",
@@ -113,12 +120,12 @@ CODE_DATASET = [
         "def find_max(array: List[int]) -> int:\n    return",
         " max",
     ),
-    (
-        "def calculate_mean(array: List[int]) -> float:\n    return",
-        " sum",
-        "def calculate_mode(array: List[int]) -> float:\n    return",
-        " max",
-    ),
+    # (
+    #     "def calculate_mean(array: List[int]) -> float:\n    return",
+    #     " sum",
+    #     "def calculate_mode(array: List[int]) -> float:\n    return",
+    #     " max",
+    # ),
 ]
 # %%
 for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
@@ -148,65 +155,45 @@ for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
         prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
     )
 # %%
-model.tokenizer.padding_side = "left"
-all_tokens = model.to_tokens([d[0] for d in CODE_DATASET], prepend_bos=True)
-cf_tokens = model.to_tokens([d[2] for d in CODE_DATASET], prepend_bos=True)
-attention_mask = get_attention_mask(model.tokenizer, all_tokens, prepend_bos=False)
-answer_prefix = " " if PREPEND_SPACE_TO_ANSWER else ""
-answer_tokens = torch.tensor(
-    [
-        (
-            model.to_single_token(answer_prefix + answer),
-            model.to_single_token(answer_prefix + cf_answer),
-        )
-        for _, answer, _, cf_answer in CODE_DATASET
-    ],
-    device=device,
-    dtype=torch.int64,
-)
-assert all_tokens.shape == cf_tokens.shape
-assert (all_tokens == model.tokenizer.pad_token_id).sum() == (
-    cf_tokens == model.tokenizer.pad_token_id
-).sum()
-print(all_tokens.shape, answer_tokens.shape)
-# %%
-CENTERED = False
-all_logits: Float[Tensor, "batch pos d_vocab"] = model(
-    all_tokens, prepend_bos=False, return_type="logits", attention_mask=attention_mask
-)
-all_logit_diffs = get_logit_diff(
-    all_logits, answer_tokens=answer_tokens, per_prompt=True
-)
-if CENTERED:
-    all_logit_diffs -= all_logit_diffs.mean()
-print(all_logit_diffs)
-# %%
-cf_logits: Float[Tensor, "batch pos d_vocab"] = model(
-    cf_tokens, prepend_bos=False, return_type="logits", attention_mask=attention_mask
-)
-cf_logit_diffs = get_logit_diff(cf_logits, answer_tokens=answer_tokens, per_prompt=True)
-if CENTERED:
-    cf_logit_diffs -= cf_logit_diffs.mean()
-print(cf_logit_diffs)
+all_logit_diffs = []
+cf_logit_diffs = []
+for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
+    prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
+    cf_tokens = model.to_tokens(cf_prompt, prepend_bos=True)
+    answer_id = model.to_single_token(answer)
+    cf_answer_id = model.to_single_token(cf_answer)
+    answer_tokens = torch.tensor(
+        [answer_id, cf_answer_id], dtype=torch.int64, device=device
+    ).unsqueeze(0)
+    assert prompt_tokens.shape == cf_tokens.shape, (
+        f"Prompt and counterfactual prompt must have the same shape, "
+        f"for prompt {prompt} "
+        f"got {prompt_tokens.shape} and {cf_tokens.shape}"
+    )
+    model.reset_hooks()
+    base_logits = model(prompt_tokens, prepend_bos=False, return_type="logits")
+    base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
+    cf_logits = model(cf_tokens, prepend_bos=False, return_type="logits")
+    assert isinstance(cf_logits, Tensor)
+    cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens)
+    all_logit_diffs.append(base_ldiff)
+    cf_logit_diffs.append(cf_ldiff)
+all_logit_diffs = torch.stack(all_logit_diffs, dim=0)
+cf_logit_diffs = torch.stack(cf_logit_diffs, dim=0)
 # %%
 print(f"Original mean: {all_logit_diffs.mean():.2f}")
 print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 # %%
-print(f"Original accuracy: {(all_logit_diffs > 0).float().mean():.2f}")
-print(f"Counterfactual accuracy: {(cf_logit_diffs < 0).float().mean():.2f}")
-# %%
-"""
-TODO:
-* Ensure cf prompts are same length
-* Compute accuracy on original and flipped prompts
-* Perform activation patching on periods and visualise results
-"""
+assert (all_logit_diffs > 0).all()
+assert (cf_logit_diffs < 0).all()
 
 
 # %%
 # # ##############################################
 # # ACTIVATION PATCHING
 # # ##############################################
+
+
 # %%
 def plot_patch_by_layer(
     prompt: str,
@@ -228,13 +215,12 @@ def plot_patch_by_layer(
         f"for prompt {prompt} "
         f"got {prompt_tokens.shape} and {cf_tokens.shape}"
     )
-    model.reset_hooks(including_permanent=True)
-    base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
+    model.reset_hooks()
+    base_logits, base_cache = model.run_with_cache(
         prompt_tokens,
         prepend_bos=False,
         return_type="logits",
     )
-    base_logits: Float[Tensor, "... d_vocab"] = base_logits_by_pos[:, -1, :]
     base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
     cf_logits, cf_cache = model.run_with_cache(
         cf_tokens, prepend_bos=False, return_type="logits"
@@ -245,6 +231,8 @@ def plot_patch_by_layer(
     metric = lambda logits: (
         get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
     ) / (cf_ldiff - base_ldiff)
+    assert np.isclose(metric(base_logits).item(), 0.0)
+    assert np.isclose(metric(cf_logits).item(), 1.0)
     results = act_patch(
         model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=True
     )[
@@ -283,7 +271,6 @@ def plot_patch_by_layer(
 
 # %%
 figs = []
-patch_idx = 0
 for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
     prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
     base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
@@ -295,9 +282,6 @@ for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
     #     break
     fig = plot_patch_by_layer(prompt, answer, cf_prompt, cf_answer)
     figs.append(fig)
-    patch_idx += 1
-    if patch_idx > 5:
-        break
 # Merge figures into subplots
 fig = make_subplots(
     rows=len(figs), cols=1, subplot_titles=[f.layout.title.text for f in figs]
