@@ -73,7 +73,7 @@ random.seed(0)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # %%
 model = HookedTransformer.from_pretrained(
-    "pythia-2.8b",
+    "santacoder",
     torch_dtype=torch.float32,
     fold_ln=False,
     center_writing_weights=False,
@@ -84,42 +84,66 @@ assert model.tokenizer is not None
 # %%
 PREPEND_SPACE_TO_ANSWER = False
 CODE_DATASET = [
-    (
-        "def count_words(string: str) -> int:\n    return len(string.split",
-        "())",
-        "def count_lines(string: str) -> int:\n    return len(string.split",
-        "lines",
-    ),
-    (
-        "def reverse_string(string: str) -> str:\n    return string[",
-        "::",
-        "def first_half(string: str) -> str:\n    return string[",
-        "0",
-    ),
+    # (
+    #     "def count_words(string: str) -> int:\n    return len(string.",
+    #     "split",
+    #     "def count_lines(string: str) -> int:\n    return len(string.",
+    #     "splitlines",
+    # ),
+    # (
+    #     "def reverseorder_string(string: str) -> str:\n    return string",
+    #     "[::-",
+    #     "def halve_string(string: str) -> str:\n    return string",
+    #     "[:",
+    # ),
     (
         "def is_uppercase(string: str) -> bool:\n    return string.is",
         "upper",
         "def is_lowercase(string: str) -> bool:\n    return string.is",
         "lower",
     ),
+    (
+        "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+        "upper",
+        "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+        "upper",
+        "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+        "upper",
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+        "upper",
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+        "lower",
+    ),
     # (
-    #     "def convert_to_Celsius(temp: float) -> float:\n    return (temp",
+    #     "def convert_to_celsius(temp: float) -> float:\n    return (temp",
     #     " -",
     #     "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
     #     " *",
     # ),
-    (
-        "def _factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " n",
-        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " fib",
-    ),
-    (
-        "def find_min(array: List[int]) -> int:\n    return",
-        " min",
-        "def find_max(array: List[int]) -> int:\n    return",
-        " max",
-    ),
+    # (
+    #     "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+    #     " n",
+    #     "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+    #     " fib",
+    # ),
+    # (
+    #     "def find_min(array: List[int]) -> int:\n    return",
+    #     " min",
+    #     "def find_max(array: List[int]) -> int:\n    return",
+    #     " max",
+    # ),
     # (
     #     "def calculate_mean(array: List[int]) -> float:\n    return",
     #     " sum",
@@ -253,7 +277,7 @@ def plot_patch_by_layer(
             x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
             y=[f"{i}" for i in range(model.cfg.n_layers)],
             colorscale="RdBu",
-            zmin=-1,
+            zmin=0,
             zmax=1,
             # set midpoint to 0
             zmid=0,
