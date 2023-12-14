@@ -77,12 +77,13 @@ assert model.tokenizer is not None
 # %%
 PREFIX = (
     "[INST] Question: "
-    # "[INST] Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: No\n"
+    # "Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: No\n"
     # "Question: Anne is loud. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: Yes\n"
     # "Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is old and quiet. Is Anne smart? Answer: Yes\n"
     # "Question: "
 )
 SUFFIX = " Answer (Yes/No): [/INST]"
+PREPEND_SPACE_TO_ANSWER = False
 PROMPT_TEMPLATE = "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
 NAMES = [
     "Anne",
@@ -296,8 +297,6 @@ ANSWERS = ANSWERS[:100]
 
 
 # %%
-PREPEND_SPACE_TO_ANSWER = False
-# %%
 for prompt, cf_prompt in zip(PROMPTS, CF_PROMPTS):
     prompt_str_tokens = model.to_str_tokens(prompt)
     cf_str_tokens = model.to_str_tokens(cf_prompt)
@@ -356,7 +355,6 @@ assert all_tokens.shape == cf_tokens.shape
 assert (all_tokens == model.tokenizer.pad_token_id).sum() == (
     cf_tokens == model.tokenizer.pad_token_id
 ).sum()
-# assert np.isclose(pct_true, 0.5)
 print(all_tokens.shape, answer_tokens.shape, pct_true)
 # %%
 CENTERED = np.isclose(pct_true, 0.5)
@@ -398,7 +396,6 @@ TODO:
 # # ##############################################
 # %%
 def plot_patch_by_layer(
-    prompt_name: str,
     prompt: str,
     answer: str,
     cf_prompt: str,
@@ -415,7 +412,7 @@ def plot_patch_by_layer(
     ).unsqueeze(0)
     assert prompt_tokens.shape == cf_tokens.shape, (
         f"Prompt and counterfactual prompt must have the same shape, "
-        f"for prompt {prompt_name} "
+        f"for prompt {prompt} "
         f"got {prompt_tokens.shape} and {cf_tokens.shape}"
     )
     model.reset_hooks(including_permanent=True)
@@ -462,7 +459,7 @@ def plot_patch_by_layer(
             hovertemplate="Layer %{y}<br>Position %{x}<br>Logit diff %{z}<extra></extra>",
         ),
         layout=dict(
-            title=f"Patching metric by layer: {model.cfg.model_name}, {prompt_name}",
+            title=f"Patching metric by layer, {model.cfg.model_name}",
             xaxis_title="Position",
             yaxis_title="Layer",
             title_x=0.5,
@@ -473,7 +470,10 @@ def plot_patch_by_layer(
 
 # %%
 figs = []
-for prompt_name, prompt, answer, cf_prompt, cf_answer in list_of_prompts:
+patch_idx = 0
+for prompt, answer, cf_prompt, cf_answer in zip(
+    PROMPTS, ANSWERS, CF_PROMPTS, CF_ANSWERS
+):
     prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
     base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,
@@ -482,8 +482,11 @@ for prompt_name, prompt, answer, cf_prompt, cf_answer in list_of_prompts:
     )
     # if prompt_name == "sentiment inference":
     #     break
-    fig = plot_patch_by_layer(prompt_name, prompt, answer, cf_prompt, cf_answer)
+    fig = plot_patch_by_layer(prompt, answer, cf_prompt, cf_answer)
     figs.append(fig)
+    patch_idx += 1
+    if patch_idx > 5:
+        break
 # Merge figures into subplots
 fig = make_subplots(
     rows=len(figs), cols=1, subplot_titles=[f.layout.title.text for f in figs]
@@ -505,38 +508,38 @@ fig.show()
 # DIG INTO EXAMPLES
 # ##############################################
 # %%
-top_k = 10
-PROMPT_NAME = "knowledge extraction"
-ABLATION_TOKEN = ","
-layer = 0
-for prompt_name, prompt, answer, _, _ in list_of_prompts:
-    if prompt_name != PROMPT_NAME:
-        continue
-    model.reset_hooks()
-    my_test_prompt = partial(
-        test_prompt,
-        prompt=prompt,
-        answer=answer,
-        model=model,
-        top_k=top_k,
-        prepend_space_to_answer=False,
-        prepend_bos=False,
-    )
-    prompt_tokens = model.to_tokens(prompt, prepend_bos=False)
-    prompt_str_tokens = model.to_str_tokens(prompt_tokens, prepend_bos=False)
-    ablation_pos = prompt_str_tokens.index(ABLATION_TOKEN)  # type: ignore
-    ablation_mask = torch.zeros_like(prompt_tokens, dtype=torch.bool)
-    ablation_mask[:, ablation_pos] = True
-    ablation_values = torch.zeros(
-        (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
-    )
-    ablation_hook = AblationHook(
-        model, ablation_mask, ablation_values=ablation_values, layers_to_ablate=layer
-    )
-    print("baseline")
-    my_test_prompt()
-    print(f"Zero Ablating '{ABLATION_TOKEN}'")
-    with ablation_hook:
-        my_test_prompt()
+# top_k = 10
+# PROMPT_NAME = "knowledge extraction"
+# ABLATION_TOKEN = ","
+# layer = 0
+# for prompt_name, prompt, answer, _, _ in list_of_prompts:
+#     if prompt_name != PROMPT_NAME:
+#         continue
+#     model.reset_hooks()
+#     my_test_prompt = partial(
+#         test_prompt,
+#         prompt=prompt,
+#         answer=answer,
+#         model=model,
+#         top_k=top_k,
+#         prepend_space_to_answer=False,
+#         prepend_bos=False,
+#     )
+#     prompt_tokens = model.to_tokens(prompt, prepend_bos=False)
+#     prompt_str_tokens = model.to_str_tokens(prompt_tokens, prepend_bos=False)
+#     ablation_pos = prompt_str_tokens.index(ABLATION_TOKEN)  # type: ignore
+#     ablation_mask = torch.zeros_like(prompt_tokens, dtype=torch.bool)
+#     ablation_mask[:, ablation_pos] = True
+#     ablation_values = torch.zeros(
+#         (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
+#     )
+#     ablation_hook = AblationHook(
+#         model, ablation_mask, ablation_values=ablation_values, layers_to_ablate=layer
+#     )
+#     print("baseline")
+#     my_test_prompt()
+#     print(f"Zero Ablating '{ABLATION_TOKEN}'")
+#     with ablation_hook:
+#         my_test_prompt()
 
 # %%
