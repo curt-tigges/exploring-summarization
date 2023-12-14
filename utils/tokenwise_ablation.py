@@ -1,3 +1,4 @@
+import itertools
 import os
 import einops
 from functools import partial
@@ -218,12 +219,20 @@ class AblationHook:
         model: HookedTransformer,
         pos_mask: Int[Tensor, "batch pos"],
         layers_to_ablate: int | List[int] | Literal["all"] = "all",
-        cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
-        direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
+        ablation_values: Optional[Float[Tensor, "layer d_model"]] = None,
+        ablation_directions: Optional[Float[Tensor, "layer d_model"]] = None,
         multiplier: float = 1.0,
         all_positions: bool = False,
         device: torch.device = DEFAULT_DEVICE,
+        sample_index: Optional[int] = None,
     ):
+        assert (
+            ablation_values is None or ablation_directions is None
+        ), "Only one of ablation_values or ablation_directions can be specified"
+        if ablation_values is None and ablation_directions is None:
+            ablation_values = torch.zeros(
+                (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
+            )
         if layers_to_ablate == "all":
             layers_to_ablate = list(range(model.cfg.n_layers))
         if isinstance(layers_to_ablate, int):
@@ -231,11 +240,12 @@ class AblationHook:
         self.model = model
         self.layers_to_ablate = layers_to_ablate
         self.pos_mask = pos_mask
-        self.cached_means = cached_means
-        self.direction_vectors = direction_vectors
+        self.ablation_values = ablation_values
+        self.ablation_directions = ablation_directions
         self.multiplier = multiplier
         self.all_positions = all_positions
         self.device = device
+        self._sample_index = sample_index
 
     def layer(self):
         assert len(self.layers_to_ablate) == 1
@@ -246,12 +256,18 @@ class AblationHook:
         assert self.pos_mask.sum() == 1
         return self.pos_mask.float().argmax(dim=1)
 
+    def sample_index(self):
+        if self._sample_index is None:
+            return 0
+        else:
+            return self._sample_index
+
     def __enter__(self):
         for layer in self.layers_to_ablate:
             hook = partial(
                 ablation_hook_base,
-                cached_means=self.cached_means,
-                direction_vectors=self.direction_vectors,
+                cached_means=self.ablation_values,
+                direction_vectors=self.ablation_directions,
                 multiplier=self.multiplier,
                 pos_mask=self.pos_mask,
                 layer=layer,
@@ -268,12 +284,9 @@ class AblationHookIterator:
         self,
         model: HookedTransformer,
         tokens: Int[Tensor, "batch pos"],
-        positions: List[int] | Literal["all"] = "all",
-        layers_to_ablate: List[int] | Literal["all"] = "all",
-        cached_means: Optional[Float[Tensor, "layer d_model"]] = None,
-        direction_vectors: Optional[Float[Tensor, "layer d_model"]] = None,
-        multiplier: float = 1.0,
-        all_positions: bool = False,
+        positions: List[int] | List[List[int]] | Literal["all"] = "all",
+        layers_to_ablate: List[int] | List[List[int]] | Literal["all"] = "all",
+        ablation_values: Optional[Float[Tensor, "*batch layer d_model"]] = None,
         device: torch.device = DEFAULT_DEVICE,
     ) -> None:
         if layers_to_ablate == "all":
@@ -282,25 +295,27 @@ class AblationHookIterator:
             layers_to_ablate = [layers_to_ablate]
         if positions == "all":
             positions = list(range(tokens.shape[1]))
-        if cached_means is None and direction_vectors is None:
-            cached_means = torch.zeros(
+        if ablation_values is None:
+            ablation_values = torch.zeros(
                 (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
             )
+        if ablation_values.ndim == 2:
+            ablation_values = ablation_values.unsqueeze(0)
+        ablation_value_list = torch.unbind(ablation_values, dim=0)
         self.hooks = []
-        for layer in layers_to_ablate:
-            for pos in positions:
-                ablation_mask = torch.zeros_like(tokens, dtype=torch.bool)
-                ablation_mask[:, pos] = True
+        for layer, pos in itertools.product(layers_to_ablate, positions):
+            ablation_mask = torch.zeros_like(tokens, dtype=torch.bool)
+            ablation_mask[:, pos] = True
+            for ablation_idx, ablation_value in enumerate(ablation_value_list):
                 self.hooks.append(
                     AblationHook(
                         model,
                         ablation_mask,
                         layer,
-                        cached_means,
-                        direction_vectors,
-                        multiplier,
-                        all_positions,
-                        device,
+                        ablation_values=ablation_value,
+                        all_positions=False,
+                        device=device,
+                        sample_index=ablation_idx,
                     )
                 )
 
@@ -459,8 +474,8 @@ def compute_ablation_modified_loss(
             model,
             pos_mask=batch_pos,
             layers_to_ablate=layers_to_ablate,
-            cached_means=cached_means,
-            direction_vectors=direction_vectors,
+            ablation_values=cached_means,
+            ablation_directions=direction_vectors,
             multiplier=multiplier,
             all_positions=all_positions,
             device=device,

@@ -1,9 +1,10 @@
+import os
 import yaml
 from transformer_lens import HookedTransformer
 import torch
 from torch import Tensor
 from jaxtyping import Float, Int, Bool
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 import einops
 from enum import Enum
 import re
@@ -11,7 +12,7 @@ import re
 
 def extract_placeholders(text: str) -> List[str]:
     # Use regex to find all instances of {SOME_TEXT}
-    matches = re.findall(r'\{(\w+)\}', text)
+    matches = re.findall(r"\{(\w+)\}", text)
     return matches
 
 
@@ -25,20 +26,26 @@ def interleave_list(lst: list) -> list:
     Reorders a list to interleave its first and second halves.
     If the list has an odd length, the extra element will be included in the first half.
     """
-    midpoint = len(lst) // 2 + len(lst) % 2  # This ensures the first half gets the extra element if length is odd
+    midpoint = (
+        len(lst) // 2 + len(lst) % 2
+    )  # This ensures the first half gets the extra element if length is odd
     first_half = lst[:midpoint]
     second_half = lst[midpoint:]
-    
+
     result = []
     for i in range(midpoint):
         result.append(first_half[i])
-        if i < len(second_half):  # Make sure we don't go out of bounds for the second half
+        if i < len(
+            second_half
+        ):  # Make sure we don't go out of bounds for the second half
             result.append(second_half[i])
 
     return result
 
 
-def filter_words_by_length(model: HookedTransformer, words: list, length: int, verbose=False) -> list:
+def filter_words_by_length(
+    model: HookedTransformer, words: list, length: int, verbose=False
+) -> list:
     if verbose:
         print("Filtering words by length")
     new_words = []
@@ -52,13 +59,15 @@ def filter_words_by_length(model: HookedTransformer, words: list, length: int, v
     return new_words
 
 
-def truncate_words_by_length(model: HookedTransformer, words: list, length: int, verbose=False) -> list:
+def truncate_words_by_length(
+    model: HookedTransformer, words: list, length: int, verbose=False
+) -> list:
     if verbose:
         print("Truncating words by length")
     new_words = []
     for word in words:
         tkn = model.to_str_tokens(word, prepend_bos=False)
-        trunc = ''.join(tkn[:length])
+        trunc = "".join(tkn[:length])
         new_words.append(trunc)
     return new_words
 
@@ -72,36 +81,39 @@ class CircularList(list):
 
 
 class PromptsConfig:
-
     def __init__(self) -> None:
-        with open("prompts.yaml", "r") as f:
-            prompts_dict = yaml.safe_load(f)
+        if os.path.exists("prompts.yaml"):
+            with open("prompts.yaml", "r") as f:
+                prompts_dict = yaml.safe_load(f)
+        else:
+            prompts_dict = dict()
         self._prompts_dict = prompts_dict
-        
+
     def get(
-        self, 
-        key: str, 
-        model: HookedTransformer, 
-        filter_length: int = None, 
-        truncate_length: int = None,
+        self,
+        key: str,
+        model: HookedTransformer,
+        filter_length: Optional[int] = None,
+        truncate_length: Optional[int] = None,
         drop_duplicates: bool = True,
-        prepend_space: bool = True, 
+        prepend_space: bool = True,
         verbose: bool = False,
     ) -> CircularList:
-        assert filter_length is not None or truncate_length is not None, (
-            "Must specify at least one of filter_length or truncate_length"
-        )
+        assert (
+            filter_length is not None or truncate_length is not None
+        ), "Must specify at least one of filter_length or truncate_length"
         words: list = self._prompts_dict[key]
         if prepend_space:
             words = [" " + word.strip() for word in words]
         if filter_length is not None:
             words = filter_words_by_length(model, words, filter_length, verbose=verbose)
         if truncate_length is not None:
-            words = truncate_words_by_length(model, words, truncate_length, verbose=verbose)
+            words = truncate_words_by_length(
+                model, words, truncate_length, verbose=verbose
+            )
         if drop_duplicates:
             words = dedup_list(words)
         return CircularList(words)
-    
 
 
 class PromptType(Enum):
@@ -147,43 +159,45 @@ class PromptType(Enum):
                 "Review B: 'I thought this movie was{SUBJ2_ADJ1}, I {SUBJ2_VRB} it. The acting was{SUBJ2_ADJ2}, the plot was{SUBJ2_ADJ3}, "
                 "and overall the movie was just very {SUBJ2_ADJ4}.'\n"
                 "Review {SUBJ} Sentiment:"
-            )
+            ),
         }
         return prompt_strings[self]
-    
+
     def get_placeholders(self) -> List[str]:
-        '''
+        """
         Example output: ['ADJ', 'VRB']
-        '''
+        """
         formatter = self.get_format_string()
         return extract_placeholders(formatter)
-    
+
     def get_placeholder_positions(self, token_list: List[str]) -> Dict[str, List[int]]:
-        '''
+        """
         Identifies placeholder positions in a list of string tokens.
         Handles whether the placeholder is a single token or multi-token.
         Example output: {'ADJ': [4, 5], 'VRB': [8]}
-        '''
+        """
         format_string = self.get_format_string()
         format_idx = 0
         curr_sub_token = None
         out = dict()
         for token_index, token in enumerate(token_list):
-            if format_string[format_idx] == '{':
-                curr_sub_token = format_string[format_idx + 1:format_string.find('}', format_idx)]
+            if format_string[format_idx] == "{":
+                curr_sub_token = format_string[
+                    format_idx + 1 : format_string.find("}", format_idx)
+                ]
             if format_string.find(token, format_idx) >= 0:
                 format_idx = format_string.find(token, format_idx) + len(token)
             elif curr_sub_token is not None:
                 out[curr_sub_token] = out.get(curr_sub_token, []) + [token_index]
         return out
-    
+
 
 prompt_config = PromptsConfig()
 
 
 def get_prompts(
     model: HookedTransformer,
-    prompt_type: str = "simple", 
+    prompt_type: str = "simple",
 ) -> Tuple[Dict[str, CircularList[str]], Dict[str, CircularList[str]]]:
     # Define output types
     pos_prompts: CircularList[str]
@@ -191,17 +205,39 @@ def get_prompts(
     neutral_prompts: CircularList[str]
 
     # Read lists from config
-    pos_answers: CircularList[str] = prompt_config.get("positive_answer_tokens", model, filter_length=1)
-    neg_answers: CircularList[str] = prompt_config.get("negative_answer_tokens", model, filter_length=1)
-    positive_adjectives: CircularList[str] = prompt_config.get("positive_core_adjectives", model, filter_length=1)
-    negative_adjectives: CircularList[str] = prompt_config.get("negative_core_adjectives", model, filter_length=1)
-    neutral_adjectives: CircularList[str] = prompt_config.get("neutral_core_adjectives", model, filter_length=1)
-    positive_verbs: CircularList[str] = prompt_config.get("positive_verbs", model, filter_length=1)
-    negative_verbs: CircularList[str] = prompt_config.get("negative_verbs", model, filter_length=1)
-    neutral_verbs: CircularList[str] = prompt_config.get("neutral_verbs", model, filter_length=1)
-    positive_top_adjectives: CircularList[str] = prompt_config.get("positive_top_adjectives", model, filter_length=1)
-    negative_top_adjectives: CircularList[str] = prompt_config.get("negative_top_adjectives", model, filter_length=1)
-    neutral_top_adjectives: CircularList[str] = prompt_config.get("neutral_top_adjectives", model, filter_length=1)
+    pos_answers: CircularList[str] = prompt_config.get(
+        "positive_answer_tokens", model, filter_length=1
+    )
+    neg_answers: CircularList[str] = prompt_config.get(
+        "negative_answer_tokens", model, filter_length=1
+    )
+    positive_adjectives: CircularList[str] = prompt_config.get(
+        "positive_core_adjectives", model, filter_length=1
+    )
+    negative_adjectives: CircularList[str] = prompt_config.get(
+        "negative_core_adjectives", model, filter_length=1
+    )
+    neutral_adjectives: CircularList[str] = prompt_config.get(
+        "neutral_core_adjectives", model, filter_length=1
+    )
+    positive_verbs: CircularList[str] = prompt_config.get(
+        "positive_verbs", model, filter_length=1
+    )
+    negative_verbs: CircularList[str] = prompt_config.get(
+        "negative_verbs", model, filter_length=1
+    )
+    neutral_verbs: CircularList[str] = prompt_config.get(
+        "neutral_verbs", model, filter_length=1
+    )
+    positive_top_adjectives: CircularList[str] = prompt_config.get(
+        "positive_top_adjectives", model, filter_length=1
+    )
+    negative_top_adjectives: CircularList[str] = prompt_config.get(
+        "negative_top_adjectives", model, filter_length=1
+    )
+    neutral_top_adjectives: CircularList[str] = prompt_config.get(
+        "neutral_top_adjectives", model, filter_length=1
+    )
 
     # Get prompt type/format
     prompt_type = PromptType(prompt_type)
@@ -209,33 +245,85 @@ def get_prompts(
 
     if prompt_type == PromptType.SIMPLE:
         n_prompts = min(len(positive_adjectives), len(negative_adjectives))
-        pos_prompts = [formatter.format(ADJ=positive_adjectives[i], VRB=positive_verbs[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(ADJ=negative_adjectives[i], VRB=negative_verbs[i]) for i in range(n_prompts)]
-        neutral_prompts = [formatter.format(ADJ=neutral_adjectives[i], VRB=neutral_verbs[i]) for i in range(len(neutral_adjectives))]
+        pos_prompts = [
+            formatter.format(ADJ=positive_adjectives[i], VRB=positive_verbs[i])
+            for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(ADJ=negative_adjectives[i], VRB=negative_verbs[i])
+            for i in range(n_prompts)
+        ]
+        neutral_prompts = [
+            formatter.format(ADJ=neutral_adjectives[i], VRB=neutral_verbs[i])
+            for i in range(len(neutral_adjectives))
+        ]
     elif prompt_type == PromptType.SIMPLE_TRAIN:
         n_prompts = min(len(positive_adjectives), len(negative_adjectives))
-        positive_adjectives = prompt_config.get("positive_adjectives_train", model, filter_length=1)
-        negative_adjectives = prompt_config.get("negative_adjectives_train", model, filter_length=1)
+        positive_adjectives = prompt_config.get(
+            "positive_adjectives_train", model, filter_length=1
+        )
+        negative_adjectives = prompt_config.get(
+            "negative_adjectives_train", model, filter_length=1
+        )
         neutral_prompts = None
-        pos_prompts = [formatter.format(ADJ=positive_adjectives[i], VRB=positive_verbs[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(ADJ=negative_adjectives[i], VRB=negative_verbs[i]) for i in range(n_prompts)]
+        pos_prompts = [
+            formatter.format(ADJ=positive_adjectives[i], VRB=positive_verbs[i])
+            for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(ADJ=negative_adjectives[i], VRB=negative_verbs[i])
+            for i in range(n_prompts)
+        ]
     elif prompt_type == PromptType.SIMPLE_TEST:
-        positive_adjectives = prompt_config.get("positive_adjectives_test", model, filter_length=1)
-        negative_adjectives = prompt_config.get("negative_adjectives_test", model, filter_length=1)
+        positive_adjectives = prompt_config.get(
+            "positive_adjectives_test", model, filter_length=1
+        )
+        negative_adjectives = prompt_config.get(
+            "negative_adjectives_test", model, filter_length=1
+        )
         n_prompts = min(len(positive_adjectives), len(negative_adjectives))
-        positive_adjectives = prompt_config.get("positive_adjectives_test", model, filter_length=1)
-        negative_adjectives = prompt_config.get("negative_adjectives_test", model, filter_length=1)
+        positive_adjectives = prompt_config.get(
+            "positive_adjectives_test", model, filter_length=1
+        )
+        negative_adjectives = prompt_config.get(
+            "negative_adjectives_test", model, filter_length=1
+        )
         neutral_prompts = None
-        pos_prompts = [formatter.format(ADJ=positive_adjectives[i], VRB=positive_verbs[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(ADJ=negative_adjectives[i], VRB=negative_verbs[i]) for i in range(n_prompts)]
+        pos_prompts = [
+            formatter.format(ADJ=positive_adjectives[i], VRB=positive_verbs[i])
+            for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(ADJ=negative_adjectives[i], VRB=negative_verbs[i])
+            for i in range(n_prompts)
+        ]
     elif prompt_type == PromptType.SIMPLE_MOOD:
-        positive_feelings: CircularList[str] = prompt_config.get("positive_feelings", model, filter_length=1)
-        negative_feelings: CircularList[str] = prompt_config.get("negative_feelings", model, filter_length=1)
-        positive_adverbs: CircularList[str] = prompt_config.get("positive_adverbs", model, filter_length=2)
-        negative_adverbs: CircularList[str] = prompt_config.get("negative_adverbs", model, filter_length=2)
-        n_prompts = min(len(positive_adverbs), len(positive_feelings), len(negative_adverbs), len(negative_feelings))
-        pos_prompts = [formatter.format(ADV=positive_adverbs[i], FEEL=positive_feelings[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(ADV=negative_adverbs[i], FEEL=negative_feelings[i]) for i in range(n_prompts)]
+        positive_feelings: CircularList[str] = prompt_config.get(
+            "positive_feelings", model, filter_length=1
+        )
+        negative_feelings: CircularList[str] = prompt_config.get(
+            "negative_feelings", model, filter_length=1
+        )
+        positive_adverbs: CircularList[str] = prompt_config.get(
+            "positive_adverbs", model, filter_length=2
+        )
+        negative_adverbs: CircularList[str] = prompt_config.get(
+            "negative_adverbs", model, filter_length=2
+        )
+        n_prompts = min(
+            len(positive_adverbs),
+            len(positive_feelings),
+            len(negative_adverbs),
+            len(negative_feelings),
+        )
+        pos_prompts = [
+            formatter.format(ADV=positive_adverbs[i], FEEL=positive_feelings[i])
+            for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(ADV=negative_adverbs[i], FEEL=negative_feelings[i])
+            for i in range(n_prompts)
+        ]
         neutral_prompts = None
         pos_answers = prompt_config.get("positive_moods", model, filter_length=1)
         neg_answers = prompt_config.get("negative_moods", model, filter_length=1)
@@ -243,102 +331,210 @@ def get_prompts(
         positive_adverbs = prompt_config.get("positive_adverbs", model, filter_length=2)
         negative_adverbs = prompt_config.get("negative_adverbs", model, filter_length=2)
         n_prompts = min(len(positive_adverbs), len(negative_adverbs))
-        pos_prompts = [formatter.format(ADV=positive_adverbs[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(ADV=negative_adverbs[i]) for i in range(n_prompts)]
+        pos_prompts = [
+            formatter.format(ADV=positive_adverbs[i]) for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(ADV=negative_adverbs[i]) for i in range(n_prompts)
+        ]
         neutral_prompts = None
         pos_answers = prompt_config.get("positive_moods", model, filter_length=1)
         neg_answers = prompt_config.get("negative_moods", model, filter_length=1)
     elif prompt_type == PromptType.SIMPLE_FRENCH:
-        positive_french_adj = prompt_config.get("positive_french_adjectives", model, filter_length=3)
-        negative_french_adj = prompt_config.get("negative_french_adjectives", model, filter_length=3)
-        positive_french_verbs = prompt_config.get("positive_french_verbs", model, filter_length=3)
-        negative_french_verbs = prompt_config.get("negative_french_verbs", model, filter_length=3)
+        positive_french_adj = prompt_config.get(
+            "positive_french_adjectives", model, filter_length=3
+        )
+        negative_french_adj = prompt_config.get(
+            "negative_french_adjectives", model, filter_length=3
+        )
+        positive_french_verbs = prompt_config.get(
+            "positive_french_verbs", model, filter_length=3
+        )
+        negative_french_verbs = prompt_config.get(
+            "negative_french_verbs", model, filter_length=3
+        )
         n_prompts = min(len(positive_french_adj), len(negative_french_adj))
-        pos_prompts = [formatter.format(ADJ=positive_french_adj[i], VRB=positive_french_verbs[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(ADJ=negative_french_adj[i], VRB=negative_french_verbs[i]) for i in range(n_prompts)]
+        pos_prompts = [
+            formatter.format(ADJ=positive_french_adj[i], VRB=positive_french_verbs[i])
+            for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(ADJ=negative_french_adj[i], VRB=negative_french_verbs[i])
+            for i in range(n_prompts)
+        ]
         neutral_prompts = None
-        pos_answers = prompt_config.get("positive_french_answers", model, truncate_length=1)
-        neg_answers = prompt_config.get("negative_french_answers", model, truncate_length=1)
+        pos_answers = prompt_config.get(
+            "positive_french_answers", model, truncate_length=1
+        )
+        neg_answers = prompt_config.get(
+            "negative_french_answers", model, truncate_length=1
+        )
     elif prompt_type == PromptType.PROPER_NOUNS:
-        positive_proper = prompt_config.get("positive_proper_nouns", model, filter_length=1)
-        negative_proper = prompt_config.get("negative_proper_nouns", model, filter_length=1)
+        positive_proper = prompt_config.get(
+            "positive_proper_nouns", model, filter_length=1
+        )
+        negative_proper = prompt_config.get(
+            "negative_proper_nouns", model, filter_length=1
+        )
         n_prompts = min(len(positive_proper), len(negative_proper))
-        pos_prompts = [formatter.format(NOUN=positive_proper[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(NOUN=negative_proper[i]) for i in range(n_prompts)]
+        pos_prompts = [
+            formatter.format(NOUN=positive_proper[i]) for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(NOUN=negative_proper[i]) for i in range(n_prompts)
+        ]
         neutral_prompts = None
     elif prompt_type == PromptType.MEDICAL:
         positive_medical = prompt_config.get("positive_medical", model, filter_length=1)
         negative_medical = prompt_config.get("negative_medical", model, filter_length=1)
         n_prompts = min(len(positive_medical), len(negative_medical))
-        pos_prompts = [formatter.format(MED=positive_medical[i]) for i in range(n_prompts)]
-        neg_prompts = [formatter.format(MED=negative_medical[i]) for i in range(n_prompts)]
+        pos_prompts = [
+            formatter.format(MED=positive_medical[i]) for i in range(n_prompts)
+        ]
+        neg_prompts = [
+            formatter.format(MED=negative_medical[i]) for i in range(n_prompts)
+        ]
         neutral_prompts = None
     elif prompt_type in (
-        PromptType.COMPLETION, PromptType.COMPLETION_2, PromptType.RES_CLASS_1
+        PromptType.COMPLETION,
+        PromptType.COMPLETION_2,
+        PromptType.RES_CLASS_1,
     ):
         n_prompts = min(len(positive_adjectives), len(negative_adjectives))
         pos_prompts = [
-            formatter.format(ADJ1=positive_adjectives[i], ADJ2=positive_adjectives[i + 1], ADJ3=positive_adjectives[i + 2], VRB=positive_verbs[i])
+            formatter.format(
+                ADJ1=positive_adjectives[i],
+                ADJ2=positive_adjectives[i + 1],
+                ADJ3=positive_adjectives[i + 2],
+                VRB=positive_verbs[i],
+            )
             for i in range(n_prompts)
         ]
         neg_prompts = [
-            formatter.format(ADJ1=negative_adjectives[i], ADJ2=negative_adjectives[i + 1], ADJ3=negative_adjectives[i + 2], VRB=negative_verbs[i])
+            formatter.format(
+                ADJ1=negative_adjectives[i],
+                ADJ2=negative_adjectives[i + 1],
+                ADJ3=negative_adjectives[i + 2],
+                VRB=negative_verbs[i],
+            )
             for i in range(n_prompts)
         ]
         neutral_prompts = [
-            formatter.format(ADJ1=neutral_adjectives[i], ADJ2=neutral_adjectives[i + 1], ADJ3=neutral_adjectives[i + 2], VRB=neutral_verbs[i])
+            formatter.format(
+                ADJ1=neutral_adjectives[i],
+                ADJ2=neutral_adjectives[i + 1],
+                ADJ3=neutral_adjectives[i + 2],
+                VRB=neutral_verbs[i],
+            )
             for i in range(n_prompts)
         ]
     elif prompt_type in (
-        PromptType.CLASSIFICATION, PromptType.CLASSIFICATION_2, PromptType.CLASSIFICATION_3, PromptType.CLASSIFICATION_4
+        PromptType.CLASSIFICATION,
+        PromptType.CLASSIFICATION_2,
+        PromptType.CLASSIFICATION_3,
+        PromptType.CLASSIFICATION_4,
     ):
         n_prompts = min(len(positive_adjectives), len(negative_adjectives))
         pos_prompts = [
-            formatter.format(ADJ1=positive_adjectives[i], ADJ2=positive_adjectives[i + 1], ADJ3=positive_adjectives[i + 2], ADJ4=positive_top_adjectives[i], VRB=positive_verbs[i])
+            formatter.format(
+                ADJ1=positive_adjectives[i],
+                ADJ2=positive_adjectives[i + 1],
+                ADJ3=positive_adjectives[i + 2],
+                ADJ4=positive_top_adjectives[i],
+                VRB=positive_verbs[i],
+            )
             for i in range(n_prompts)
         ]
         neg_prompts = [
-            formatter.format(ADJ1=negative_adjectives[i], ADJ2=negative_adjectives[i + 1], ADJ3=negative_adjectives[i + 2], ADJ4=negative_top_adjectives[i], VRB=negative_verbs[i])
+            formatter.format(
+                ADJ1=negative_adjectives[i],
+                ADJ2=negative_adjectives[i + 1],
+                ADJ3=negative_adjectives[i + 2],
+                ADJ4=negative_top_adjectives[i],
+                VRB=negative_verbs[i],
+            )
             for i in range(n_prompts)
         ]
         neutral_prompts = [
-            formatter.format(ADJ1=neutral_adjectives[i], ADJ2=neutral_adjectives[i + 1], ADJ3=neutral_adjectives[i + 2], ADJ4=neutral_top_adjectives[i], VRB=neutral_verbs[i])
+            formatter.format(
+                ADJ1=neutral_adjectives[i],
+                ADJ2=neutral_adjectives[i + 1],
+                ADJ3=neutral_adjectives[i + 2],
+                ADJ4=neutral_top_adjectives[i],
+                VRB=neutral_verbs[i],
+            )
             for i in range(n_prompts)
         ]
     elif prompt_type == PromptType.MULTI_SUBJECT_1:
         n_prompts = min(len(positive_adjectives), len(negative_adjectives))
         pos_prompts = [
             formatter.format(
-                SUBJ1_ADJ1=positive_adjectives[i], SUBJ1_ADJ2=positive_adjectives[i + 1], SUBJ1_ADJ3=positive_adjectives[i + 2], SUBJ1_ADJ4=positive_top_adjectives[i], SUBJ1_VRB=positive_verbs[i],
-                SUBJ2_ADJ1=negative_adjectives[i], SUBJ2_ADJ2=negative_adjectives[i + 1], SUBJ2_ADJ3=negative_adjectives[i + 2], SUBJ2_VRB=negative_verbs[i], SUBJ2_ADJ4=negative_top_adjectives[i],
+                SUBJ1_ADJ1=positive_adjectives[i],
+                SUBJ1_ADJ2=positive_adjectives[i + 1],
+                SUBJ1_ADJ3=positive_adjectives[i + 2],
+                SUBJ1_ADJ4=positive_top_adjectives[i],
+                SUBJ1_VRB=positive_verbs[i],
+                SUBJ2_ADJ1=negative_adjectives[i],
+                SUBJ2_ADJ2=negative_adjectives[i + 1],
+                SUBJ2_ADJ3=negative_adjectives[i + 2],
+                SUBJ2_VRB=negative_verbs[i],
+                SUBJ2_ADJ4=negative_top_adjectives[i],
                 SUBJ="A",
-            ) for i in range(n_prompts)
+            )
+            for i in range(n_prompts)
         ] + [
             formatter.format(
-                SUBJ1_ADJ1=negative_adjectives[i], SUBJ1_ADJ2=negative_adjectives[i + 1], SUBJ1_ADJ3=negative_adjectives[i + 2], SUBJ1_VRB=negative_verbs[i], SUBJ1_ADJ4=negative_top_adjectives[i],
-                SUBJ2_ADJ1=positive_adjectives[i], SUBJ2_ADJ2=positive_adjectives[i + 1], SUBJ2_ADJ3=positive_adjectives[i + 2], SUBJ2_VRB=positive_verbs[i], SUBJ2_ADJ4=positive_top_adjectives[i],
+                SUBJ1_ADJ1=negative_adjectives[i],
+                SUBJ1_ADJ2=negative_adjectives[i + 1],
+                SUBJ1_ADJ3=negative_adjectives[i + 2],
+                SUBJ1_VRB=negative_verbs[i],
+                SUBJ1_ADJ4=negative_top_adjectives[i],
+                SUBJ2_ADJ1=positive_adjectives[i],
+                SUBJ2_ADJ2=positive_adjectives[i + 1],
+                SUBJ2_ADJ3=positive_adjectives[i + 2],
+                SUBJ2_VRB=positive_verbs[i],
+                SUBJ2_ADJ4=positive_top_adjectives[i],
                 SUBJ="B",
-            ) for i in range(n_prompts)
+            )
+            for i in range(n_prompts)
         ]
         neg_prompts = [
             formatter.format(
-                SUBJ1_ADJ1=positive_adjectives[i], SUBJ1_ADJ2=positive_adjectives[i + 1], SUBJ1_ADJ3=positive_adjectives[i + 2], SUBJ1_VRB=positive_verbs[i], SUBJ1_ADJ4=positive_top_adjectives[i],
-                SUBJ2_ADJ1=negative_adjectives[i], SUBJ2_ADJ2=negative_adjectives[i + 1], SUBJ2_ADJ3=negative_adjectives[i + 2], SUBJ2_VRB=negative_verbs[i], SUBJ2_ADJ4=negative_top_adjectives[i],
+                SUBJ1_ADJ1=positive_adjectives[i],
+                SUBJ1_ADJ2=positive_adjectives[i + 1],
+                SUBJ1_ADJ3=positive_adjectives[i + 2],
+                SUBJ1_VRB=positive_verbs[i],
+                SUBJ1_ADJ4=positive_top_adjectives[i],
+                SUBJ2_ADJ1=negative_adjectives[i],
+                SUBJ2_ADJ2=negative_adjectives[i + 1],
+                SUBJ2_ADJ3=negative_adjectives[i + 2],
+                SUBJ2_VRB=negative_verbs[i],
+                SUBJ2_ADJ4=negative_top_adjectives[i],
                 SUBJ="B",
-            ) for i in range(n_prompts)
+            )
+            for i in range(n_prompts)
         ] + [
             formatter.format(
-                SUBJ1_ADJ1=negative_adjectives[i], SUBJ1_ADJ2=negative_adjectives[i + 1], SUBJ1_ADJ3=negative_adjectives[i + 2], SUBJ1_VRB=negative_verbs[i], SUBJ1_ADJ4=negative_top_adjectives[i],
-                SUBJ2_ADJ1=positive_adjectives[i], SUBJ2_ADJ2=positive_adjectives[i + 1], SUBJ2_ADJ3=positive_adjectives[i + 2], SUBJ2_VRB=positive_verbs[i], SUBJ2_ADJ4=positive_top_adjectives[i],
+                SUBJ1_ADJ1=negative_adjectives[i],
+                SUBJ1_ADJ2=negative_adjectives[i + 1],
+                SUBJ1_ADJ3=negative_adjectives[i + 2],
+                SUBJ1_VRB=negative_verbs[i],
+                SUBJ1_ADJ4=negative_top_adjectives[i],
+                SUBJ2_ADJ1=positive_adjectives[i],
+                SUBJ2_ADJ2=positive_adjectives[i + 1],
+                SUBJ2_ADJ3=positive_adjectives[i + 2],
+                SUBJ2_VRB=positive_verbs[i],
+                SUBJ2_ADJ4=positive_top_adjectives[i],
                 SUBJ="A",
-            ) for i in range(n_prompts)
+            )
+            for i in range(n_prompts)
         ]
         pos_prompts = interleave_list(pos_prompts)
         neg_prompts = interleave_list(neg_prompts)
         neutral_prompts = None
     else:
         raise ValueError(f"Invalid prompt type: {prompt_type}")
-    
+
     # check length match
     assert len(pos_prompts) == len(neg_prompts), (
         f"Number of positive prompts ({len(pos_prompts)}) "
@@ -363,13 +559,12 @@ def get_prompts(
 
 
 class CleanCorruptedDataset(torch.utils.data.Dataset):
-
     def __init__(
-        self, 
-        clean_tokens: Float[Tensor, "batch pos"], 
+        self,
+        clean_tokens: Float[Tensor, "batch pos"],
         corrupted_tokens: Float[Tensor, "batch pos"],
         answer_tokens: Float[Tensor, "batch pair correct"],
-        all_prompts: List[str], 
+        all_prompts: List[str],
     ):
         super().__init__()
         self.clean_tokens = clean_tokens
@@ -383,52 +578,56 @@ class CleanCorruptedDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return self.clean_tokens.shape[0]
-    
+
     def __getitem__(self, idx):
         return (
-            self.clean_tokens[idx], 
-            self.corrupted_tokens[idx], 
+            self.clean_tokens[idx],
+            self.corrupted_tokens[idx],
             self.answer_tokens[idx],
         )
 
 
 def get_dataset(
-    model: HookedTransformer, 
+    model: HookedTransformer,
     device: torch.device,
     n_pairs: int = None,
     prompt_type: str = "simple",
     comparison: Tuple[str, str] = ("positive", "negative"),
 ) -> CleanCorruptedDataset:
     prompt_type = PromptType(prompt_type)
-    prompts_dict, answers_dict = get_prompts(
-        model, prompt_type
-    )
+    prompts_dict, answers_dict = get_prompts(model, prompt_type)
     if n_pairs is None:
         n_pairs = min(
-            len(answers_dict[comparison[0]]), 
-            len(answers_dict[comparison[1]]), 
+            len(answers_dict[comparison[0]]),
+            len(answers_dict[comparison[1]]),
         )
     assert n_pairs <= len(answers_dict[comparison[0]])
     n_prompts = min(
-        len(prompts_dict[comparison[0]]), 
-        len(prompts_dict[comparison[1]]), 
+        len(prompts_dict[comparison[0]]),
+        len(prompts_dict[comparison[1]]),
     )
     batch_size = n_prompts * 2
     all_prompts = []
     answer_tokens = torch.empty(
-        (batch_size, n_pairs, 2), 
-        device=device, 
-        dtype=torch.long
+        (batch_size, n_pairs, 2), device=device, dtype=torch.long
     )
     prompt_len = None
     for i in range(n_prompts):
         all_prompts.append(prompts_dict[comparison[0]][i])
         all_prompts.append(prompts_dict[comparison[1]][i])
         for pair_idx in range(n_pairs):
-            answer_tokens[i * 2, pair_idx, 0] = model.to_single_token(answers_dict[comparison[0]][pair_idx])
-            answer_tokens[i * 2, pair_idx, 1] = model.to_single_token(answers_dict[comparison[1]][pair_idx])
-            answer_tokens[i * 2 + 1, pair_idx, 0] = model.to_single_token(answers_dict[comparison[1]][pair_idx])
-            answer_tokens[i * 2 + 1, pair_idx, 1] = model.to_single_token(answers_dict[comparison[0]][pair_idx])
+            answer_tokens[i * 2, pair_idx, 0] = model.to_single_token(
+                answers_dict[comparison[0]][pair_idx]
+            )
+            answer_tokens[i * 2, pair_idx, 1] = model.to_single_token(
+                answers_dict[comparison[1]][pair_idx]
+            )
+            answer_tokens[i * 2 + 1, pair_idx, 0] = model.to_single_token(
+                answers_dict[comparison[1]][pair_idx]
+            )
+            answer_tokens[i * 2 + 1, pair_idx, 1] = model.to_single_token(
+                answers_dict[comparison[0]][pair_idx]
+            )
         if prompt_len is None:
             prompt_len = len(model.to_tokens(all_prompts[-1], prepend_bos=True))
         else:
@@ -444,32 +643,31 @@ def get_dataset(
         "Last token in prompt should not be BOS token, "
         "this suggests inconsistent prompt lengths."
     )
-    
+
     return CleanCorruptedDataset(
-        all_prompts=all_prompts, 
-        answer_tokens=answer_tokens, 
-        clean_tokens=clean_tokens, 
+        all_prompts=all_prompts,
+        answer_tokens=answer_tokens,
+        clean_tokens=clean_tokens,
         corrupted_tokens=corrupted_tokens,
     )
 
+
 def get_onesided_datasets(
-    model: HookedTransformer, 
+    model: HookedTransformer,
     device: torch.device,
     n_answers: int = 1,
     prompt_type: str = "simple",
     dataset_sentiments: list = ["positive", "negative"],
     answer_sentiment: str = "positive",
 ):
-    '''
+    """
     answer_tokens:
-        list of the token (ie an integer) corresponding to each answer, 
+        list of the token (ie an integer) corresponding to each answer,
         in the format (correct_token, incorrect_token)
-    '''
+    """
     assert prompt_type in ["simple", "completion", "classification"]
-    
-    prompt_str_dict, answers_dict = get_prompts(
-        model, prompt_type
-    )
+
+    prompt_str_dict, answers_dict = get_prompts(model, prompt_type)
     prompts_dict = {
         key: model.to_tokens(values, prepend_bos=True)
         for key, values in prompt_str_dict.items()
@@ -479,11 +677,9 @@ def get_onesided_datasets(
             f"{prompt_k} prompt has seq len {prompt_v.shape[1]} "
             f"while positive has seq len {prompts_dict['positive'].shape[1]}"
         )
-    
+
     n_prompts = min([prompts_dict[s].shape[0] for s in dataset_sentiments])
-    prompt_return_dict = {
-        s:prompts_dict[s][:n_prompts] for s in dataset_sentiments
-    }
+    prompt_return_dict = {s: prompts_dict[s][:n_prompts] for s in dataset_sentiments}
 
     answers = answers or answers_dict[answer_sentiment]
     assert len(answers) >= n_answers
@@ -491,10 +687,8 @@ def get_onesided_datasets(
     answer_list = [answers for _ in range(n_prompts)]
     answer_tokens = torch.stack(answer_list, dim=0).to(device)
 
-    return (
-        prompt_return_dict, 
-        answer_tokens
-    )
+    return (prompt_return_dict, answer_tokens)
+
 
 def get_ccs_dataset(
     model: HookedTransformer,
@@ -503,22 +697,27 @@ def get_ccs_dataset(
     pos_answers: List[str] = [" Positive"],
     neg_answers: List[str] = [" Negative"],
 ) -> Tuple[
-    Float[Tensor, "batch q_and_a"], 
-    Float[Tensor, "batch q_and_a"], 
+    Float[Tensor, "batch q_and_a"],
+    Float[Tensor, "batch q_and_a"],
     List[List[str]],
     List[List[str]],
     Int[Tensor, "batch"],
     Bool[Tensor, "batch"],
 ]:
     clean_corrupt_data: CleanCorruptedDataset = get_dataset(
-        model, device, n_pairs=1, prompt_type=prompt_type, 
-        pos_answers=pos_answers, neg_answers=neg_answers,
+        model,
+        device,
+        n_pairs=1,
+        prompt_type=prompt_type,
+        pos_answers=pos_answers,
+        neg_answers=neg_answers,
     )
     answer_tokens: Int[Tensor, "batch 2"] = clean_corrupt_data.answer_tokens.squeeze(1)
     possible_answers = answer_tokens[0]
     possible_answers_repeated: Int[Tensor, "batch 2"] = einops.repeat(
-        possible_answers, "answers -> batch answers", 
-        batch=clean_corrupt_data.clean_tokens.shape[0]
+        possible_answers,
+        "answers -> batch answers",
+        batch=clean_corrupt_data.clean_tokens.shape[0],
     )
     # concatenate clean_tokens and answer_tokens along new dimension
     pos_tokens: Float[Tensor, "batch q_and_a"] = torch.cat(
@@ -527,15 +726,15 @@ def get_ccs_dataset(
     neg_tokens: Float[Tensor, "batch q_and_a"] = torch.cat(
         (clean_corrupt_data.clean_tokens, possible_answers_repeated[:, -1:]), dim=1
     )
-    gt_labels: Int[Tensor, "batch"] = (
-        pos_tokens[:, -1] == answer_tokens[:, 0]
-    ).to(torch.int64) # 1 for positive, 0 for negative
+    gt_labels: Int[Tensor, "batch"] = (pos_tokens[:, -1] == answer_tokens[:, 0]).to(
+        torch.int64
+    )  # 1 for positive, 0 for negative
     truncated: Bool[Tensor, "batch"] = torch.zeros(
         gt_labels.shape[0], device=device, dtype=torch.bool
     )
     pos_prompts = [
-        [prompt, answer] 
-        for prompt in clean_corrupt_data.all_prompts 
+        [prompt, answer]
+        for prompt in clean_corrupt_data.all_prompts
         for answer in pos_answers
     ]
     neg_prompts = [
