@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from datasets import load_dataset, concatenate_datasets
 from jaxtyping import Float, Int, Bool
 from typing import Dict, Iterable, List, Tuple, Union, Literal, Optional
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import (
     get_dataset,
@@ -65,23 +66,23 @@ torch.manual_seed(0)
 random.seed(0)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # %%
+# hf_model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
+# hf_tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
+# hf_model.to(device)
+# %%
 model = HookedTransformer.from_pretrained(
     "mistral-7b-instruct",
     torch_dtype=torch.bfloat16,
     fold_ln=False,
     center_writing_weights=False,
     center_unembed=False,
+    device=device,
+    # hf_model=hf_model,
 )
-model = model.to(device)
 assert model.tokenizer is not None
+print(model.tokenizer.padding_side)
 # %%
-PREFIX = (
-    "[INST] Question: "
-    # "Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: No\n"
-    # "Question: Anne is loud. Anne is not young. Anne is sleepy. Anne is smart if she is loud. Is Anne smart? Answer: Yes\n"
-    # "Question: Anne is quiet. Anne is not young. Anne is sleepy. Anne is smart if she is old and quiet. Is Anne smart? Answer: Yes\n"
-    # "Question: "
-)
+PREFIX = "[INST] Question: "
 SUFFIX = " Answer (Yes/No): [/INST]"
 PREPEND_SPACE_TO_ANSWER = False
 PROMPT_TEMPLATE = "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
@@ -100,7 +101,6 @@ NAMES = [
     "Oliver",
     "Sophie",
     "Josh",
-    "Mia",
     "Tom",
     "Rachel",
     "Henry",
@@ -257,6 +257,7 @@ PROMPT_TUPLES = [
         (POSITIVE_ATTRIBUTES[attr3_idx], POSITIVE_ATTRIBUTES[attr2_idx]),
     ]
 ]
+random.seed(0)
 random.shuffle(PROMPT_TUPLES)
 PROMPT_TUPLES = PROMPT_TUPLES[:1000]
 PROMPTS = [
@@ -294,6 +295,7 @@ CF_ANSWERS = [a for a, keep in zip(CF_ANSWERS, to_keep) if keep]
 PROMPTS = PROMPTS[:100]
 CF_PROMPTS = CF_PROMPTS[:100]
 ANSWERS = ANSWERS[:100]
+CF_ANSWERS = CF_ANSWERS[:100]
 
 
 # %%
@@ -302,6 +304,11 @@ for prompt, cf_prompt in zip(PROMPTS, CF_PROMPTS):
     cf_str_tokens = model.to_str_tokens(cf_prompt)
     assert len(prompt_str_tokens) == len(cf_str_tokens), (
         f"Prompt and counterfactual prompt must have the same length, "
+        f"for prompt \n{prompt_str_tokens} \n and counterfactual\n{cf_str_tokens} \n"
+        f"got {len(prompt_str_tokens)} and {len(cf_str_tokens)}"
+    )
+    assert len(prompt_str_tokens) == 19, (
+        f"Prompt and counterfactual prompt must have length 19 before prefix/suffix, "
         f"for prompt \n{prompt_str_tokens} \n and counterfactual\n{cf_str_tokens} \n"
         f"got {len(prompt_str_tokens)} and {len(cf_str_tokens)}"
     )
@@ -330,64 +337,95 @@ for prompt, answer, cf_prompt, cf_answer in zip(
     if i > 10:
         break
 # %%
-model.tokenizer.padding_side = "left"
-all_tokens = model.to_tokens(
-    [PREFIX + prompt + SUFFIX for prompt in PROMPTS], prepend_bos=True
-)
-cf_tokens = model.to_tokens(
-    [PREFIX + cf_prompt + SUFFIX for cf_prompt in CF_PROMPTS], prepend_bos=True
-)
-attention_mask = get_attention_mask(model.tokenizer, all_tokens, prepend_bos=False)
-answer_prefix = " " if PREPEND_SPACE_TO_ANSWER else ""
-answer_tokens = torch.tensor(
+all_logit_diffs = []
+cf_logit_diffs = []
+for prompt, cf_prompt in zip(PROMPTS, CF_PROMPTS):
+    prompt_tokens = model.to_tokens(PREFIX + prompt + SUFFIX, prepend_bos=True)
+    cf_tokens = model.to_tokens(PREFIX + cf_prompt + SUFFIX, prepend_bos=True)
+    yes_id = model.to_single_token("Yes")
+    no_id = model.to_single_token("No")
+    answer_tokens = torch.tensor(
+        [yes_id, no_id], dtype=torch.int64, device=device
+    ).unsqueeze(0)
+    assert prompt_tokens.shape == cf_tokens.shape, (
+        f"Prompt and counterfactual prompt must have the same shape, "
+        f"for prompt {prompt} "
+        f"got {prompt_tokens.shape} and {cf_tokens.shape}"
+    )
+    model.reset_hooks()
+    base_logits = model(
+        prompt_tokens,
+        prepend_bos=False,
+        return_type="logits",
+    )
+    base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
+    cf_logits = model(cf_tokens, prepend_bos=False, return_type="logits")
+    assert isinstance(cf_logits, Tensor)
+    cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens)
+    all_logit_diffs.append(base_ldiff)
+    cf_logit_diffs.append(cf_ldiff)
+all_logit_diffs = torch.stack(all_logit_diffs, dim=0)
+cf_logit_diffs = torch.stack(cf_logit_diffs, dim=0)
+# %%
+# Adjust so that predictions are balanced
+true_yes_count = sum([answer == "Yes" for answer in ANSWERS])
+sorted_logit_diffs = torch.sort(all_logit_diffs, descending=True)[0]
+cutoff = sorted_logit_diffs[true_yes_count].item()
+adjusted_logit_diffs = all_logit_diffs - cutoff
+assert (adjusted_logit_diffs > 0).sum().item() == true_yes_count
+# Adjust counterfactual so that predictions are balanced
+cf_true_yes_count = sum([answer == "Yes" for answer in CF_ANSWERS])
+cf_sorted_logit_diffs = torch.sort(cf_logit_diffs, descending=True)[0]
+cf_cutoff = cf_sorted_logit_diffs[cf_true_yes_count].item()
+cf_adjusted_logit_diffs = cf_logit_diffs - cf_cutoff
+assert (cf_adjusted_logit_diffs > 0).sum().item() == cf_true_yes_count
+# Convert back to sign of correct answer
+orig_logit_diffs_signed = torch.tensor(
     [
-        (
-            model.to_single_token(answer_prefix + answer),
-            model.to_single_token(answer_prefix + cf_answer),
-        )
-        for answer, cf_answer in zip(ANSWERS, CF_ANSWERS)
+        logit_diff if answer == "Yes" else -logit_diff
+        for logit_diff, answer in zip(all_logit_diffs, ANSWERS)
     ],
+    dtype=torch.float32,
     device=device,
-    dtype=torch.int64,
 )
-pct_true = (answer_tokens[:, 0] == answer_tokens[0, 0]).float().mean().item()
-assert all_tokens.shape == cf_tokens.shape
-assert (all_tokens == model.tokenizer.pad_token_id).sum() == (
-    cf_tokens == model.tokenizer.pad_token_id
-).sum()
-print(all_tokens.shape, answer_tokens.shape, pct_true)
-# %%
-CENTERED = np.isclose(pct_true, 0.5)
-all_logits: Float[Tensor, "batch pos d_vocab"] = model(
-    all_tokens, prepend_bos=False, return_type="logits", attention_mask=attention_mask
+cf_logit_diffs_signed = torch.tensor(
+    [
+        logit_diff if answer == "Yes" else -logit_diff
+        for logit_diff, answer in zip(cf_logit_diffs, CF_ANSWERS)
+    ],
+    dtype=torch.float32,
+    device=device,
 )
-all_logit_diffs = get_logit_diff(
-    all_logits, answer_tokens=answer_tokens, per_prompt=True
+adjusted_logit_diffs_signed = torch.tensor(
+    [
+        logit_diff if answer == "Yes" else -logit_diff
+        for logit_diff, answer in zip(adjusted_logit_diffs, ANSWERS)
+    ],
+    dtype=torch.float32,
+    device=device,
 )
-if CENTERED:
-    all_logit_diffs -= all_logit_diffs.mean()
-print(all_logit_diffs)
-# %%
-cf_logits: Float[Tensor, "batch pos d_vocab"] = model(
-    cf_tokens, prepend_bos=False, return_type="logits", attention_mask=attention_mask
+cf_adjusted_logit_diffs_signed = torch.tensor(
+    [
+        logit_diff if answer == "Yes" else -logit_diff
+        for logit_diff, answer in zip(cf_adjusted_logit_diffs, CF_ANSWERS)
+    ],
+    dtype=torch.float32,
+    device=device,
 )
-cf_logit_diffs = get_logit_diff(cf_logits, answer_tokens=answer_tokens, per_prompt=True)
-if CENTERED:
-    cf_logit_diffs -= cf_logit_diffs.mean()
-print(cf_logit_diffs)
 # %%
-print(f"Original mean: {all_logit_diffs.mean():.2f}")
-print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
+print(f"Original mean: {orig_logit_diffs_signed.mean():.2f}")
+print(f"Original Counterfactual mean: {cf_logit_diffs_signed.mean():.2f}")
+print(f"Original accuracy: {(orig_logit_diffs_signed > 0).float().mean():.2f}")
+print(
+    f"Original Counterfactual accuracy: {(cf_logit_diffs_signed > 0).float().mean():.2f}"
+)
 # %%
-print(f"Original accuracy: {(all_logit_diffs > 0).float().mean():.2f}")
-print(f"Counterfactual accuracy: {(cf_logit_diffs < 0).float().mean():.2f}")
-# %%
-"""
-TODO:
-* Ensure cf prompts are same length
-* Compute accuracy on original and flipped prompts
-* Perform activation patching on periods and visualise results
-"""
+print(f"Adjusted mean: {adjusted_logit_diffs_signed.mean():.2f}")
+print(f"Adjusted Counterfactual mean: {cf_adjusted_logit_diffs_signed.mean():.2f}")
+print(f"Adjusted accuracy: {(adjusted_logit_diffs_signed > 0).float().mean():.2f}")
+print(
+    f"Adjusted Counterfactual accuracy: {(cf_adjusted_logit_diffs_signed > 0).float().mean():.2f}"
+)
 
 
 # %%
@@ -402,9 +440,9 @@ def plot_patch_by_layer(
     cf_answer: str,
     prepend_bos: bool = True,
 ) -> go.Figure:
-    prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
+    prompt_tokens = model.to_tokens(PREFIX + prompt + SUFFIX, prepend_bos=prepend_bos)
     prompt_str_tokens = model.to_str_tokens(prompt_tokens, prepend_bos=prepend_bos)
-    cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
+    cf_tokens = model.to_tokens(PREFIX + cf_prompt + SUFFIX, prepend_bos=prepend_bos)
     answer_id = model.to_single_token(answer)
     cf_answer_id = model.to_single_token(cf_answer)
     answer_tokens = torch.tensor(
@@ -444,7 +482,7 @@ def plot_patch_by_layer(
         layer=model.cfg.n_layers,
         pos=prompt_tokens.shape[1],
     )
-    results = results.cpu().numpy()
+    results = results.to(dtype=torch.float32).cpu().numpy()
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -474,14 +512,12 @@ patch_idx = 0
 for prompt, answer, cf_prompt, cf_answer in zip(
     PROMPTS, ANSWERS, CF_PROMPTS, CF_ANSWERS
 ):
-    prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
+    prompt_tokens = model.to_tokens(PREFIX + prompt + SUFFIX, prepend_bos=True)
     base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,
         prepend_bos=False,
         return_type="logits",
     )
-    # if prompt_name == "sentiment inference":
-    #     break
     fig = plot_patch_by_layer(prompt, answer, cf_prompt, cf_answer)
     figs.append(fig)
     patch_idx += 1
