@@ -353,13 +353,15 @@ class ExperimentData(ABC):
             "positions" in example_ds.column_names
         ), "Dataset does not have a 'positions' column in the train split"
 
-    def get_dataloaders(self, batch_size: int) -> Dict[str, ExperimentDataLoader]:
+    def get_dataloaders(
+        self, batch_size: int, **kwargs
+    ) -> Dict[str, ExperimentDataLoader]:
         """Returns a dictionary of dataloaders for each split"""
 
         dataloaders = {}
         for split in self.dataset_dict.keys():
             dataloaders[split] = ExperimentDataLoader(
-                self.dataset_dict[split], batch_size=batch_size
+                self.dataset_dict[split], batch_size=batch_size, **kwargs
             )
         return dataloaders
 
