@@ -267,8 +267,11 @@ def plot_patch_by_layer(
 
 # %%
 figs = []
-patch_idx = 0
-for prompt, answer, cf_prompt, cf_answer in DATASET:
+for patch_idx, (prompt, answer, cf_prompt, cf_answer) in enumerate(DATASET):
+    if patch_idx <= 5:
+        continue
+    if patch_idx > 10:
+        break
     prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
     base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,
@@ -279,9 +282,6 @@ for prompt, answer, cf_prompt, cf_answer in DATASET:
     #     break
     fig = plot_patch_by_layer(prompt, answer, cf_prompt, cf_answer)
     figs.append(fig)
-    patch_idx += 1
-    if patch_idx > 5:
-        break
 # Merge figures into subplots
 fig = make_subplots(
     rows=len(figs), cols=1, subplot_titles=[f.layout.title.text for f in figs]
