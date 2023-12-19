@@ -9,7 +9,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from datasets import load_dataset, concatenate_datasets
 from jaxtyping import Float, Int, Bool
-from typing import Dict, Iterable, List, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import (
     get_dataset,
@@ -48,12 +48,13 @@ from utils.store import ResultsFile
 
 # %%
 device = torch.device("cuda")
-MODEL_NAME = "gpt2-small"
-TOKEN = ","
-SPLIT = "train"
+MODEL_NAME = "pythia-1.4b"
+TOKEN = ":"
+SPLIT = "train[:1000]"
 DATA_FILES = [
-    "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/ArXiv/train/data-00000-of-00222.arrow",
+    # "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/ArXiv/train/data-00000-of-00222.arrow",
     # "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/BookCorpus2/train/data-00000-of-00096.arrow",
+    "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/Github/train/data-00000-of-00191.arrow"
     # "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/Gutenberg%20(PG-19)/train/data-00000-of-00096.arrow",
     # "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/PhilPapers/train/data-00000-of-00096.arrow",
     # "https://huggingface.co/datasets/ArmelR/the-pile-splitted/blob/main/data/PubMed%20Abstracts/train/data-00000-of-00096.arrow",
@@ -95,9 +96,14 @@ exclude_regex = [
     r"[0-9]",
     r"=",
     r"^\s+$",
+    r"^[ĠčĊ]+$",
     r"-",
     r"&",
     r"\&",
+    r"\n",
+    r"\r",
+    r"\r\n",
+    r"^(?![a-zA-Z]).*$",
 ]
 exclude_list = construct_exclude_list(model, exclude_regex)
 vocab_mask = torch.ones(model.cfg.d_vocab, dtype=torch.bool, device=device)
@@ -114,15 +120,18 @@ exp_data = PileSplittedData.from_model(
 exp_data.preprocess_datasets(token_to_ablate=TOKEN_ID)
 exp_data.dataset_dict
 # %%
-data_loader = exp_data.get_dataloaders(batch_size=64)[SPLIT]
+data_loader = exp_data.get_dataloaders(batch_size=16)[SPLIT]
 print(data_loader.name, data_loader.batch_size)
 token_mean_values: Float[
     Tensor, "layer d_model"
 ] = get_layerwise_token_mean_activations(
     model, data_loader, token_id=TOKEN_ID, device=device, overwrite=OVERWRITE
 )
+token_mean_values = torch.zeros(
+    (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
+)
 # %%
-data_loader = exp_data.get_dataloaders(batch_size=32)[SPLIT]
+data_loader = exp_data.get_dataloaders(batch_size=16)[SPLIT]
 print(data_loader.name, data_loader.batch_size)
 losses = compute_ablation_modified_loss(
     model,
@@ -149,12 +158,51 @@ fig.show()
 # %%
 MAX_ORIG_LOSS = 4
 orig_loss_filter = orig_losses > MAX_ORIG_LOSS
+
+
 # %%
+def mask_positions(
+    dataloader: torch.utils.data.DataLoader,
+    exclude_following_token: Optional[int] = None,
+    exclude_list: Optional[List[int]] = None,
+) -> Float[Tensor, "row pos ..."]:
+    """
+    Returns a mask of the same shape as the dataset, with True values at positions to be excluded.
+    TODO:
+        - Add option to change number of following positions to mask
+        - Unify list of regex to single string
+    """
+    num_rows = dataloader.dataset.num_rows
+    seq_len = dataloader.dataset[0]["tokens"].shape[0]
+    mask = torch.ones((num_rows, seq_len), dtype=torch.bool)
+    if exclude_list is not None:
+        exclude_pt = torch.tensor(exclude_list, device=mask.device)
+    else:
+        exclude_pt = None
+
+    for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+        batch_tokens: Int[Tensor, "batch_size pos"] = batch["tokens"]
+        batch_start = batch_idx * dataloader.batch_size
+        batch_end = batch_start + dataloader.batch_size
+        batch_mask = torch.zeros_like(batch_tokens, dtype=torch.bool)
+        batch_mask[batch["attention_mask"] == 0] = 1
+        if exclude_pt is not None:
+            batch_mask[torch.isin(batch_tokens, exclude_pt)] = 1
+        if exclude_following_token is not None:
+            # Exclude positions directly following token to ablate
+            shifted_tokens = torch.roll(batch_tokens, shifts=1, dims=1)
+            shifted_tokens[
+                :, 0
+            ] = 0  # Set the first column to zero because roll is circular
+            batch_mask[shifted_tokens == exclude_following_token] = 1
+        mask[batch_start:batch_end] = batch_mask
+    return mask
+
+
 loss_mask = mask_positions(
     data_loader,
-    model,
     exclude_following_token=TOKEN_ID,
-    exclude_regex=exclude_regex,
+    exclude_list=exclude_list,
 )
 loss_mask |= orig_loss_filter
 # %%
@@ -268,9 +316,9 @@ fig.write_html(boxfile.path)
 # boxfile.save(fig)
 fig.show()
 # %%
-snippet = " Zeldovich pancakes"
-prompt_answer = " pancakes"
-instance_index = 1
+snippet = r'//  CloseableHttpClient client = proxy("127.0.0.1", 8087).setConnectionManager(connManager).build();'
+prompt_answer = "version"
+instance_index = 0
 answer_token = model.to_single_token(prompt_answer)
 test_elements = model.to_tokens(snippet, prepend_bos=False)
 for batch_idx, batch in enumerate(data_loader):
@@ -314,7 +362,7 @@ print("Baseline")
 my_test_prompt()
 # %%
 print("Ablate all occurences of token")
-ablation_hook = AblationHook(model, prompt_mask, cached_means=token_mean_values)
+ablation_hook = AblationHook(model, prompt_mask, ablation_values=token_mean_values)
 with ablation_hook:
     my_test_prompt()
 # %%
@@ -328,21 +376,21 @@ print(
 )
 # %%
 print("Ablate last occurence of token")
-minimal_hook = AblationHook(model, minimal_mask, cached_means=token_mean_values)
+minimal_hook = AblationHook(model, minimal_mask, ablation_values=token_mean_values)
 with minimal_hook:
     my_test_prompt()
 # %%
 print("Zero last occurence of token")
 zero_hook = AblationHook(
-    model, minimal_mask, cached_means=torch.zeros_like(token_mean_values)
+    model, minimal_mask, ablation_values=torch.zeros_like(token_mean_values)
 )
 with zero_hook:
     my_test_prompt()
 # %%
 print("Ablate random position")
 random_mask = torch.zeros_like(prompt_mask)
-random_mask[:, 20] = 1
-random_hook = AblationHook(model, random_mask, cached_means=token_mean_values)
+random_mask[:, 15] = 1
+random_hook = AblationHook(model, random_mask, ablation_values=token_mean_values)
 with random_hook:
     my_test_prompt()
 # %%
@@ -355,13 +403,5 @@ prompt_file = ResultsFile(
 )
 prompt_file.save(prompt)
 # %%
-"""
-TODO:
-* Debug Zeldovich pancakes snippet
-    Ablate non-punctuation tokens? 
-    Try zero ablation? 
-    Try patching?
-* Run on other models
-"""
 
 # %%
