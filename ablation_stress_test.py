@@ -50,24 +50,24 @@ from utils.store import ResultsFile
 # %%
 torch.set_grad_enabled(False)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-MODEL_NAME = "gpt2-small"
+MODEL_NAME = "pythia-1.4b"
 # %%
 model = HookedTransformer.from_pretrained(MODEL_NAME, device=device)
 # %%
 prompt_file = ResultsFile(
     "prompt",
     model=MODEL_NAME,
-    data="armelr___the_pile_splitted_arxiv_train",
+    data="armelr___the_pile_splitted_bookcorpus2_train_100_",
     result_type="cache",
     extension="txt",
 )
 prompt = prompt_file.load()
 prompt_tokens = model.to_tokens(prompt, prepend_bos=False)
-answer_position = -5
-answer = model.to_single_str_token(prompt_tokens[:, answer_position].item())
-prompt_tokens = prompt_tokens[:, :answer_position]
-prompt = model.to_string(prompt_tokens)
-# answer = " pancakes"
+# answer_position = -10
+# answer = model.to_single_str_token(prompt_tokens[:, answer_position].item())
+# prompt_tokens = prompt_tokens[:, :answer_position]
+# prompt = model.to_string(prompt_tokens)
+answer = " Emir"
 answer_id = model.to_single_token(answer)
 prompt
 # %%
@@ -96,11 +96,11 @@ my_test_prompt()
 # %%
 random_position = 20
 ablation_mask = torch.zeros_like(prompt_tokens, dtype=torch.bool)
-ablation_mask[:, 7] = True
+ablation_mask[:, random_position] = True
 ablation_values = torch.zeros(
     (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
 )
-ablation_hook = AblationHook(model, ablation_mask, cached_means=ablation_values)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
 print(f"Random position baseline")
 with ablation_hook:
     my_test_prompt()
@@ -111,7 +111,7 @@ ablation_mask[:, is_token[0]] = True
 ablation_values = torch.zeros(
     (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
 )
-ablation_hook = AblationHook(model, ablation_mask, cached_means=ablation_values)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
 with ablation_hook:
     my_test_prompt()
 # %%
@@ -121,7 +121,17 @@ ablation_mask[:, is_token[1]] = True
 ablation_values = torch.zeros(
     (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
 )
-ablation_hook = AblationHook(model, ablation_mask, cached_means=ablation_values)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
+with ablation_hook:
+    my_test_prompt()
+# %%
+print(f"Sixth {TOKEN} zero-ablation (pos {is_token[-1]})")
+ablation_mask = torch.zeros_like(prompt_tokens, dtype=torch.bool)
+ablation_mask[:, is_token[7]] = True
+ablation_values = torch.zeros(
+    (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
+)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
 with ablation_hook:
     my_test_prompt()
 # %%
@@ -131,17 +141,27 @@ ablation_mask[:, is_token[-1]] = True
 ablation_values = torch.zeros(
     (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
 )
-ablation_hook = AblationHook(model, ablation_mask, cached_means=ablation_values)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
 with ablation_hook:
     my_test_prompt()
-# # %%
+# %%
+print(f"Multiple {TOKEN} zero-ablation")
+ablation_mask = torch.zeros_like(prompt_tokens, dtype=torch.bool)
+ablation_mask[:, is_token[:7]] = True
+ablation_values = torch.zeros(
+    (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
+)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
+with ablation_hook:
+    my_test_prompt()
+# %%
 print(f"All {TOKEN} zero-ablation")
 ablation_mask = torch.zeros_like(prompt_tokens, dtype=torch.bool)
 ablation_mask[:, is_token] = True
 ablation_values = torch.zeros(
     (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
 )
-ablation_hook = AblationHook(model, ablation_mask, cached_means=ablation_values)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
 with ablation_hook:
     my_test_prompt()
 # %%
@@ -183,7 +203,7 @@ ablation_values /= ablation_values.norm(dim=-1, keepdim=True)
 ablation_values *= layer_scales[:, None]
 ablation_mask = torch.zeros_like(prompt_tokens, dtype=torch.bool)
 ablation_mask[:, random_position] = True
-ablation_hook = AblationHook(model, ablation_mask, cached_means=ablation_values)
+ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
 with ablation_hook:
     my_test_prompt()
 # %%
@@ -206,7 +226,7 @@ for pos in range(prompt_tokens.shape[1]):
     ablation_values = torch.zeros(
         (model.cfg.n_layers, model.cfg.d_model), dtype=torch.float32
     )
-    ablation_hook = AblationHook(model, ablation_mask, cached_means=ablation_values)
+    ablation_hook = AblationHook(model, ablation_mask, ablation_values=ablation_values)
     with ablation_hook:
         logits: Float[Tensor, "1 seq_len d_vocab"] = model.forward(
             prompt_tokens,
@@ -309,7 +329,7 @@ ablation_hook = AblationHook(
     model,
     pos_mask=batch_pos,
     layers_to_ablate=layers_to_ablate,
-    cached_means=cached_means,
+    ablation_values=cached_means,
     all_positions=all_positions,
     device=device,
 )

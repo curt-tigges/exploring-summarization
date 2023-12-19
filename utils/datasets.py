@@ -146,9 +146,8 @@ def construct_exclude_list(
 
 def mask_positions(
     dataloader: torch.utils.data.DataLoader,
-    model: HookedTransformer,
     exclude_following_token: Optional[int] = None,
-    exclude_regex: Optional[List[str]] = None,
+    exclude_list: Optional[List[int]] = None,
 ) -> Float[Tensor, "row pos ..."]:
     """
     Returns a mask of the same shape as the dataset, with True values at positions to be excluded.
@@ -159,8 +158,7 @@ def mask_positions(
     num_rows = dataloader.dataset.num_rows
     seq_len = dataloader.dataset[0]["tokens"].shape[0]
     mask = torch.ones((num_rows, seq_len), dtype=torch.bool)
-    if exclude_regex is not None:
-        exclude_list = construct_exclude_list(model, exclude_regex)
+    if exclude_list is not None:
         exclude_pt = torch.tensor(exclude_list, device=mask.device)
     else:
         exclude_pt = None
