@@ -83,9 +83,21 @@ DATASET = [
         " Diamond",
     ),
     (
+        "The first to walk on the moon is of course, Neil",
+        " Armstrong",
+        "The star of the movie Jazz Singer is of course, Neil",
+        " Diamond",
+    ),
+    (
         "Known for being the first to cross Antarctica, Sir",
         " Ernest",
         "Known for being the first to summit Everest, Sir",
+        " Edmund",
+    ),
+    (
+        "The first to cross Antarctica was of course, Sir",
+        " Ernest",
+        "The first to summit Everest was of course, Sir",
         " Edmund",
     ),
     (
@@ -95,9 +107,21 @@ DATASET = [
         " Ford",
     ),
     (
+        "The fastest production car in the world is of course, the",
+        " McL",
+        "The best selling car in the world is of course, the",
+        " Ford",
+    ),
+    (
         "Known for being the most popular fruit in the world, the humble",
         " apple",
         "Known for being the most popular vegetable in the world, the humble",
+        " potato",
+    ),
+    (
+        "The most popular fruit in the world is of course, the humble",
+        " apple",
+        "The most popular vegetable in the world is of course, the humble",
         " potato",
     ),
     (
@@ -112,18 +136,18 @@ DATASET = [
         "Known for being the most popular sport in India, the game of",
         " cricket",
     ),
-    (
-        "Here are examples of US states: California, Texas, Florida, and",
-        " New",
-        "Here are examples of US presidents: Washington, Lincoln, Obama, and",
-        " Trump",
-    ),
-    (
-        "Here are examples of US cities: Chicago Illinois, Los Angeles, New York City, and",
-        " Washington",
-        "Here are examples of US senators: Bernie Sanders, Elizabeth Warren, Kamala Harris, and",
-        " Cory",
-    ),
+    # (
+    #     "Here are examples of US states: California, Texas, Florida, and",
+    #     " New",
+    #     "Here are examples of US presidents: Washington, Lincoln, Obama, and",
+    #     " Trump",
+    # ),
+    # (
+    #     "Here are examples of US cities: Chicago Illinois, Los Angeles, New York City, and",
+    #     " Washington",
+    #     "Here are examples of US senators: Bernie Sanders, Elizabeth Warren, Kamala Harris, and",
+    #     " Cory",
+    # ),
 ]
 PREPEND_SPACE_TO_ANSWER = False
 # %%
@@ -153,6 +177,8 @@ for prompt, answer, cf_prompt, cf_answer in DATASET:
         prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
     )
     i += 2
+    if i > 2:
+        break
 # %%
 all_logit_diffs = []
 cf_logit_diffs = []
@@ -249,10 +275,8 @@ def plot_patch_by_layer(
             x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
             y=[f"{i}" for i in range(model.cfg.n_layers)],
             colorscale="RdBu",
-            zmin=-1,
+            zmin=0,
             zmax=1,
-            # set midpoint to 0
-            zmid=0,
             hovertemplate="Layer %{y}<br>Position %{x}<br>Logit diff %{z}<extra></extra>",
         ),
         layout=dict(
@@ -268,9 +292,9 @@ def plot_patch_by_layer(
 # %%
 figs = []
 for patch_idx, (prompt, answer, cf_prompt, cf_answer) in enumerate(DATASET):
-    if patch_idx <= 5:
-        continue
-    if patch_idx > 10:
+    # if patch_idx <= 5:
+    #     continue
+    if patch_idx > 7:
         break
     prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
     base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
