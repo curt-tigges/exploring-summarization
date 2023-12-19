@@ -12,8 +12,8 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from datasets import load_dataset, concatenate_datasets
 from jaxtyping import Float, Int, Bool
-from typing import Callable, Dict, Iterable, List, Tuple, Union, Literal, Optional
-from transformer_lens import ActivationCache, HookedTransformer
+from typing import Dict, Iterable, List, Tuple, Union, Literal, Optional
+from transformer_lens import HookedTransformer
 from transformer_lens.utils import (
     get_dataset,
     tokenize_and_concatenate,
@@ -54,14 +54,7 @@ from utils.datasets import (
 )
 from utils.neuroscope import plot_top_onesided
 from utils.store import ResultsFile, TensorBlockManager
-from utils.path_patching import (
-    act_patch,
-    Node,
-    IterNode,
-    IterSeqPos,
-    _act_patch_single,
-    get_batch_and_seq_pos_indices,
-)
+from utils.path_patching import act_patch, Node, IterNode, IterSeqPos
 
 # %%
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -71,174 +64,205 @@ torch.set_grad_enabled(False)
 torch.manual_seed(0)
 random.seed(0)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-PREPEND_SPACE_TO_ANSWER = False
 # %%
 model = HookedTransformer.from_pretrained(
-    "santacoder",
-    torch_dtype=torch.float32,
+    "pythia-1.4b",
+    torch_dtype=torch.bfloat16,
     fold_ln=False,
     center_writing_weights=False,
     center_unembed=False,
-    device=device,
 )
+model = model.to(device)
 assert model.tokenizer is not None
 # %%
 test_prompt(
-    "x = 0\n x += 2\nx -= 1\nprint(x) # ",
-    "1",
-    model,
-    prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
+    "Here are examples of red fruit: apple, cherry, strawberry,", " raspberry", model
 )
 # %%
-test_prompt(
-    "x = 1\n x += 2\nx -= 1\nprint(x) # ",
-    "2",
-    model,
-    prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
+PREFIX = (
+    # "Question: Anne is quiet. Anne is young. Anne is asleep. Is Anne loud? Answer: No\n"
+    # "Question: Anne is quiet. Anne is young. Anne is asleep. Is Anne quiet? Answer: Yes\n"
+    # "Question: Anne is quiet. Anne is young. Anne is asleep. Is Anne young? Answer: Yes\n"
+    # "Question: Anne is quiet. Anne is young. Anne is asleep. Is Anne old? Answer: No\n"
+    # "Question: Anne is quiet. Anne is young. Anne is asleep. Is Anne awake? Answer: No\n"
+    # "Question: Anne is quiet. Anne is young. Anne is asleep. Is Anne asleep? Answer: Yes\n"
+    "<|SYSTEM|>Answer questions with Yes/No.<|USER|>Question: "
 )
-# %%
-CODE_DATASET = [
-    (
-        "x = 0\nprint(x) # ",
-        "0",
-        "x = 1\nprint(x) # ",
-        "1",
-    ),
-    (
-        "x = 0\n x += 1\nprint(x) # ",
-        "1",
-        "x = 1\n x += 1\nprint(x) # ",
-        "2",
-    ),
-    # (
-    #     "x = 0\n x += 1\nx += 2\nprint(x) # ",
-    #     "3",
-    #     "x = 1\n x += 1\nx += 2\nprint(x) # ",
-    #     "4",
-    # ),
-    # (
-    #     "x = 0\nprint(x) # 0\n x += 1\nprint(x) # 1\nx *= 2print(x) # 2\nx += 1\nprint(x) # 3\nx -= 2\nprint(x) # ",
-    #     "1",
-    #     "x = 1\nprint(x) # 1\n x += 1\nprint(x) # 2\nx *= 2print(x) # 4\nx += 1\nprint(x) # 5\nx -= 2\nprint(x) # ",
-    #     "3",
-    # ),
-    (
-        "x = 'Hello World'\nprint(x) #",
-        " Hello",
-        "x = 'Hi Sys'\nprint(x) #",
-        " Hi",
-    ),
-    # (
-    #     "x = 'Hello World'\nx = x.upper()\nprint(x) #",
-    #     " HEL",
-    #     "x = 'Hi Sys'\nx = x.upper()\nprint(x) #",
-    #     " H",
-    # ),
-    (
-        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nx = x.upper()\nx = x.lower\nprint(x) #",
-        " hi",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
-        " HEL",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) #",
-        " H",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) # HELLO WORLD\nx = x.lower()\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) #",
-        " hi",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) # HELLO WORLD\nx = x.lower()\nprint(x) # hello world\nx *= 2\nprint(x) # hello worldhello world\nx = x.split()[0]\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) # hi sys\nx *= 2\nprint(x) # hi syshi sys\nx = x.split()[0]\nprint(x) #",
-        " hi",
-    ),
-    (
-        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "0",
-        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "1",
-    ),
-    (
-        "def print_first_n_factorial_inorder(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
-        " *",
-        "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
-        " +",
-    ),
-    (
-        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "3",
-        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "5",
-    ),
-    (
-        "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " print",
-        "def print_first_n_prime_numbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " break",
-    ),
-    (
-        "def count_words(string: str) -> int:\n    return len(string.",
-        "split",
-        "def count_lines(string: str) -> int:\n    return len(string.",
-        "splitlines",
-    ),
-    (
-        "def reverseorder_string(string: str) -> str:\n    return string",
-        "[::-",
-        "def halve_string(string: str) -> str:\n    return string",
-        "[:",
-    ),
-    (
-        "def is_uppercase(string: str) -> bool:\n    return string.is",
-        "upper",
-        "def is_lowercase(string: str) -> bool:\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
-        "upper",
-        "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
-        "upper",
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
-        "lower",
-    ),
-    (
-        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
-        " -",
-        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
-        " *",
-    ),
-    (
-        "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " n",
-        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " fib",
-    ),
-    (
-        "def find_min(array: List[int]) -> int:\n    return",
-        " min",
-        "def find_max(array: List[int]) -> int:\n    return",
-        " max",
-    ),
-    (
-        "def calculate_mean(array: List[int]) -> float:\n    return",
-        " sum",
-        "def calculate_mode(array: List[int]) -> float:\n    return",
-        " max",
-    ),
+SUFFIX = " Answer (Yes/No): <|ASSISTANT|>"
+PREPEND_SPACE_TO_ANSWER = False
+PROMPT_TEMPLATE = (
+    "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
+)
+NAMES = [
+    "Anne",
+    "Bob",
+    "Carol",
+    "David",
+    "Emma",
+    "Mike",
+    "Sarah",
+    "John",
+    "Linda",
+    "Peter",
+    "Grace",
+    "Oliver",
+    "Sophie",
+    "Josh",
+    "Mia",
+    "Tom",
+    "Rachel",
+    "Henry",
+    "Alice",
+    "George",
 ]
+POSITIVE_ATTRIBUTES = [
+    "loud",
+    "fast",
+    "tall",
+    "fat",
+    "young",
+    "strong",
+    "smart",
+    "happy",
+    "kind",
+    "funny",
+    "curious",
+    "calm",
+    "pretty",
+]
+NEGATIVE_ATTRIBUTES = [
+    "quiet",
+    "slow",
+    "short",
+    "thin",
+    "old",
+    "weak",
+    "dumb",
+    "sad",
+    "mean",
+    "serious",
+    "dull",
+    "nervous",
+    "ugly",
+]
+
+
 # %%
-for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
+def get_attribute_sign_and_index(attr: str) -> Tuple[bool, int]:
+    if attr in POSITIVE_ATTRIBUTES:
+        return True, POSITIVE_ATTRIBUTES.index(attr)
+    elif attr in NEGATIVE_ATTRIBUTES:
+        return False, NEGATIVE_ATTRIBUTES.index(attr)
+    else:
+        raise ValueError(f"Unknown attribute {attr}")
+
+
+# %%
+def get_answers_for_prompt_tuples(
+    prompt_tuples: List[Tuple[str, str, str, str, str]]
+) -> List[str]:
+    answers = []
+    for _, attr1, attr2, attr3, attr_r in prompt_tuples:
+        attr1_sign, attr1_idx = get_attribute_sign_and_index(attr1)
+        attr2_sign, attr2_idx = get_attribute_sign_and_index(attr2)
+        attr3_sign, attr3_idx = get_attribute_sign_and_index(attr3)
+        _, attr_r_idx = get_attribute_sign_and_index(attr_r)
+        if attr_r_idx == attr2_idx:
+            answer = attr2_sign
+        elif attr_r_idx == attr1_idx:
+            answer = attr1_sign
+        elif attr_r_idx == attr3_idx:
+            answer = attr3_sign
+        else:
+            raise ValueError(f"Unknown attribute {attr_r}")
+        answers.append("Yes" if answer else "No")
+    return answers
+
+
+# %%
+def get_counterfactual_tuples(
+    prompt_tuples: List[Tuple[str, str, str, str, str]], seed: int = 0
+) -> List[Tuple[str, str, str, str, str]]:
+    random.seed(seed)
+    cf_tuples = []
+    for name, attr1, attr2, attr3, attr_r in prompt_tuples:
+        idx_to_change = random.choice([0, 1, 2])
+        attr_sign, attr_idx = get_attribute_sign_and_index(
+            [attr1, attr2, attr3][idx_to_change]
+        )
+        cf_attr = (
+            POSITIVE_ATTRIBUTES[attr_idx]
+            if not attr_sign
+            else NEGATIVE_ATTRIBUTES[attr_idx]
+        )
+        cf_attr1, cf_attr2, cf_attr3 = (
+            cf_attr if idx_to_change == 0 else attr1,
+            cf_attr if idx_to_change == 1 else attr2,
+            cf_attr if idx_to_change == 2 else attr3,
+        )
+        cf_tuples.append((name, cf_attr1, cf_attr2, cf_attr3, attr_r))
+    return cf_tuples
+
+
+# %%
+PROMPT_TUPLES = [
+    (
+        name,
+        attr1_list[attr1_idx],
+        attr2_list[attr2_idx],
+        attr3_list[attr3_idx],
+        attr_r,
+    )
+    for name in NAMES
+    for attr1_idx, attr2_idx, attr3_idx in itertools.combinations(
+        range(len(POSITIVE_ATTRIBUTES)), 3
+    )
+    for attr1_list in [POSITIVE_ATTRIBUTES, NEGATIVE_ATTRIBUTES]
+    for attr2_list in [POSITIVE_ATTRIBUTES, NEGATIVE_ATTRIBUTES]
+    for attr3_list in [POSITIVE_ATTRIBUTES, NEGATIVE_ATTRIBUTES]
+    for attr_r in [
+        POSITIVE_ATTRIBUTES[attr1_idx],
+        POSITIVE_ATTRIBUTES[attr2_idx],
+        POSITIVE_ATTRIBUTES[attr3_idx],
+    ]
+]
+random.shuffle(PROMPT_TUPLES)
+PROMPT_TUPLES = PROMPT_TUPLES[:1000]
+PROMPTS = [
+    PROMPT_TEMPLATE.format(
+        NAME=name,
+        ATTR1=attr1,
+        ATTR2=attr2,
+        ATTR3=attr3,
+        ATTR_R=attr_r,
+    )
+    for name, attr1, attr2, attr3, attr_r in PROMPT_TUPLES
+]
+CF_TUPLES = get_counterfactual_tuples(PROMPT_TUPLES)
+CF_PROMPTS = [
+    PROMPT_TEMPLATE.format(
+        NAME=name,
+        ATTR1=attr1,
+        ATTR2=attr2,
+        ATTR3=attr3,
+        ATTR_R=attr_r,
+    )
+    for name, attr1, attr2, attr3, attr_r in CF_TUPLES
+]
+ANSWERS = get_answers_for_prompt_tuples(PROMPT_TUPLES)
+CF_ANSWERS = get_answers_for_prompt_tuples(CF_TUPLES)
+to_keep = [answer != cf_answer for answer, cf_answer in zip(ANSWERS, CF_ANSWERS)]
+PROMPTS = [p for p, keep in zip(PROMPTS, to_keep) if keep]
+CF_PROMPTS = [p for p, keep in zip(CF_PROMPTS, to_keep) if keep]
+ANSWERS = [a for a, keep in zip(ANSWERS, to_keep) if keep]
+CF_ANSWERS = [a for a, keep in zip(CF_ANSWERS, to_keep) if keep]
+PROMPTS = PROMPTS[:100]
+CF_PROMPTS = CF_PROMPTS[:100]
+ANSWERS = ANSWERS[:100]
+
+
+# %%
+for prompt, cf_prompt in zip(PROMPTS, CF_PROMPTS):
     prompt_str_tokens = model.to_str_tokens(prompt)
     cf_str_tokens = model.to_str_tokens(cf_prompt)
     assert len(prompt_str_tokens) == len(cf_str_tokens), (
@@ -246,32 +270,36 @@ for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
         f"for prompt \n{prompt_str_tokens} \n and counterfactual\n{cf_str_tokens} \n"
         f"got {len(prompt_str_tokens)} and {len(cf_str_tokens)}"
     )
-    model.to_single_token(answer)
-    model.to_single_token(cf_answer)
 # %%
-prompt_idx = 0
-for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
+i = 0
+for prompt, answer, cf_prompt, cf_answer in zip(
+    PROMPTS, ANSWERS, CF_PROMPTS, CF_ANSWERS
+):
+    print(prompt)
     test_prompt(
-        prompt,
+        PREFIX + prompt + SUFFIX,
         answer,
         model,
         top_k=10,
         prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
     )
+    print(cf_prompt)
     test_prompt(
-        cf_prompt,
+        PREFIX + cf_prompt + SUFFIX,
         cf_answer,
         model,
         top_k=10,
         prepend_space_to_answer=PREPEND_SPACE_TO_ANSWER,
     )
-    prompt_idx += 2
-    if prompt_idx >= 10:
+    i += 2
+    if i > 10:
         break
 # %%
 all_logit_diffs = []
 cf_logit_diffs = []
-for prompt, answer, cf_prompt, cf_answer in CODE_DATASET:
+for prompt, answer, cf_prompt, cf_answer in zip(
+    PROMPTS, ANSWERS, CF_PROMPTS, CF_ANSWERS
+):
     prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
     cf_tokens = model.to_tokens(cf_prompt, prepend_bos=True)
     answer_id = model.to_single_token(answer)
@@ -298,16 +326,14 @@ cf_logit_diffs = torch.stack(cf_logit_diffs, dim=0)
 print(f"Original mean: {all_logit_diffs.mean():.2f}")
 print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 # %%
-assert (all_logit_diffs > 0).all()  # torch.where(all_logit_diffs <= 0)
-assert (cf_logit_diffs < 0).all()  # torch.where(cf_logit_diffs >= 0)
+print(f"Original accuracy: {(all_logit_diffs > 0).float().mean():.2f}")
+print(f"Counterfactual accuracy: {(cf_logit_diffs < 0).float().mean():.2f}")
 
 
 # %%
 # # ##############################################
 # # ACTIVATION PATCHING
 # # ##############################################
-
-
 # %%
 def plot_patch_by_layer(
     prompt: str,
@@ -329,12 +355,13 @@ def plot_patch_by_layer(
         f"for prompt {prompt} "
         f"got {prompt_tokens.shape} and {cf_tokens.shape}"
     )
-    model.reset_hooks()
-    base_logits, base_cache = model.run_with_cache(
+    model.reset_hooks(including_permanent=True)
+    base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,
         prepend_bos=False,
         return_type="logits",
     )
+    base_logits: Float[Tensor, "... d_vocab"] = base_logits_by_pos[:, -1, :]
     base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
     cf_logits, cf_cache = model.run_with_cache(
         cf_tokens, prepend_bos=False, return_type="logits"
@@ -345,8 +372,6 @@ def plot_patch_by_layer(
     metric = lambda logits: (
         get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
     ) / (cf_ldiff - base_ldiff)
-    assert np.isclose(metric(base_logits).item(), 0.0)
-    assert np.isclose(metric(cf_logits).item(), 1.0)
     results = act_patch(
         model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=True
     )[
@@ -360,9 +385,6 @@ def plot_patch_by_layer(
         pos=prompt_tokens.shape[1],
     )
     results = results.cpu().numpy()
-    assert not np.isnan(results).any(), (
-        f"NaNs in results, " f"for prompt {prompt} " f"got {results}"
-    )
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -370,7 +392,7 @@ def plot_patch_by_layer(
             x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
             y=[f"{i}" for i in range(model.cfg.n_layers)],
             colorscale="RdBu",
-            zmin=0,
+            zmin=-1,
             zmax=1,
             # set midpoint to 0
             zmid=0,
@@ -388,16 +410,22 @@ def plot_patch_by_layer(
 
 # %%
 figs = []
-for patch_idx, (prompt, answer, cf_prompt, cf_answer) in enumerate(CODE_DATASET):
+patch_idx = 0
+for prompt, answer, cf_prompt, cf_answer in zip(
+    PROMPTS, ANSWERS, CF_PROMPTS, CF_ANSWERS
+):
     prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
     base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,
         prepend_bos=False,
         return_type="logits",
     )
+    # if prompt_name == "sentiment inference":
+    #     break
     fig = plot_patch_by_layer(prompt, answer, cf_prompt, cf_answer)
     figs.append(fig)
-    if patch_idx >= 6:
+    patch_idx += 1
+    if patch_idx > 5:
         break
 # Merge figures into subplots
 fig = make_subplots(
