@@ -1,7 +1,7 @@
 import torch
 import unittest
 from unittest.mock import MagicMock, patch
-from utils.datasets import ExperimentData, OWTData
+from summarization_utils.datasets import ExperimentData, OWTData
 
 
 class TestOWTData(unittest.TestCase):
@@ -16,7 +16,7 @@ class TestOWTData(unittest.TestCase):
         self.mocked_model.tokenizer = MagicMock()
         self.text_column = "text"
 
-    @patch("utils.datasets.tokenize_truncate_concatenate")
+    @patch("summarization_utils.datasets.tokenize_truncate_concatenate")
     def test_tokenize(self, mocked_tokenize_truncate_concatenate):
         outputs = {
             "train": MagicMock(),

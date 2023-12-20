@@ -12,7 +12,7 @@ import re
 import pickle
 from datasets import dataset_dict
 
-from utils.datasets import ExperimentDataLoader
+from summarization_utils.datasets import ExperimentDataLoader
 
 
 ARGS_TO_INGORE = ["device", "batch_size", "overwrite"]

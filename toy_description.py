@@ -30,8 +30,8 @@ from IPython.display import HTML, display
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from utils.circuit_analysis import get_logit_diff
-from utils.tokenwise_ablation import (
+from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.tokenwise_ablation import (
     compute_ablation_modified_loss,
     load_directions,
     get_random_directions,
@@ -44,7 +44,7 @@ from utils.tokenwise_ablation import (
     loss_fn,
     DEFAULT_DEVICE,
 )
-from utils.datasets import (
+from summarization_utils.datasets import (
     OWTData,
     PileFullData,
     PileSplittedData,
@@ -52,9 +52,9 @@ from utils.datasets import (
     mask_positions,
     construct_exclude_list,
 )
-from utils.neuroscope import plot_top_onesided
-from utils.store import ResultsFile, TensorBlockManager
-from utils.path_patching import act_patch, Node, IterNode, IterSeqPos
+from summarization_utils.neuroscope import plot_top_onesided
+from summarization_utils.store import ResultsFile, TensorBlockManager
+from summarization_utils.path_patching import act_patch, Node, IterNode, IterSeqPos
 
 # %%
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -125,9 +125,9 @@ DATASET = [
         " potato",
     ),
     (
-        "Known for being a wonder of the world, located in Australia, the",
+        "Known for being a wonder of the world located in Australia, the",
         " Great",
-        "Known for being a wonder of the world, located in India, the",
+        "Known for being a wonder of the world located in India, the",
         " Taj",
     ),
     (
@@ -205,6 +205,29 @@ for prompt, answer, cf_prompt, cf_answer in DATASET:
     cf_logit_diffs.append(cf_ldiff)
 all_logit_diffs = torch.stack(all_logit_diffs, dim=0)
 cf_logit_diffs = torch.stack(cf_logit_diffs, dim=0)
+# %%
+print(all_logit_diffs)
+# %%
+prompt_tokens = model.to_tokens([d[0] for d in DATASET], prepend_bos=True)
+cf_tokens = model.to_tokens([d[2] for d in DATASET], prepend_bos=True)
+mask = get_attention_mask(model.tokenizer, prompt_tokens, prepend_bos=False)
+cf_mask = get_attention_mask(model.tokenizer, cf_tokens, prepend_bos=False)
+assert prompt_tokens.shape == mask.shape
+answer_tokens = torch.tensor(
+    [(model.to_single_token(d[1]), model.to_single_token(d[3])) for d in DATASET],
+    device=device,
+)
+base_logits = model(prompt_tokens, prepend_bos=False, return_type="logits")
+base_ldiff = get_logit_diff(
+    base_logits, answer_tokens=answer_tokens, per_prompt=True, mask=mask
+)
+cf_logits = model(cf_tokens, prepend_bos=False, return_type="logits")
+assert isinstance(cf_logits, Tensor)
+cf_ldiff = get_logit_diff(
+    cf_logits, answer_tokens=answer_tokens, per_prompt=True, mask=cf_mask
+)
+print(base_ldiff)
+
 # %%
 print(f"Original mean: {all_logit_diffs.mean():.2f}")
 print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
@@ -320,6 +343,122 @@ fig.update_layout(
     height=400 * len(figs),
 )
 fig.show()
+
+
+# %%
+def get_position_dict(
+    tokens: Float[Tensor, "batch seq_len"], sep=","
+) -> Dict[str, List[List[int]]]:
+    """
+    Returns a dictionary of positions of clauses and separators
+    e.g. {"clause_0": [[0, 1, 2]], "sep_0": [[3]], "clause_1": [[4, 5, 6]]}
+    """
+    sep_id = model.to_single_token(sep)
+    batch_size, seq_len = tokens.shape
+    full_pos_dict = dict()
+    for b in range(batch_size):
+        batch_pos_dict = {}
+        sep_count = 0
+        current_clause = []
+        for s in range(seq_len):
+            if tokens[b, s] == sep_id:
+                batch_pos_dict[f"clause_{sep_count}"] = current_clause
+                batch_pos_dict[f"sep_{sep_count}"] = [s]
+                sep_count += 1
+                current_clause = []
+                continue
+            else:
+                current_clause.append(s)
+        if current_clause:
+            batch_pos_dict[f"clause_{sep_count}"] = current_clause
+        for k, v in batch_pos_dict.items():
+            if k in full_pos_dict:
+                full_pos_dict[k].append(v)
+            else:
+                full_pos_dict[k] = [v]
+    return full_pos_dict
+
+
+# %%
+PROMPTS = [d[0] for d in DATASET]
+CF_PROMPTS = [d[2] for d in DATASET]
+prompt_tokens = model.to_tokens(PROMPTS, prepend_bos=True)
+cf_tokens = model.to_tokens(CF_PROMPTS, prepend_bos=True)
+comma_id = model.to_single_token(",")
+n_clauses = len(DATASET[0][0].split(","))
+n_commas = DATASET[0][0].count(",")
+pos_dict = get_position_dict(prompt_tokens, sep=",")
+answer_tokens = torch.tensor(
+    [(model.to_single_token(d[1]), model.to_single_token(d[3])) for d in DATASET],
+    device=device,
+)
+mask = get_attention_mask(model.tokenizer, prompt_tokens, prepend_bos=False)
+cf_mask = get_attention_mask(model.tokenizer, cf_tokens, prepend_bos=False)
+assert prompt_tokens.shape == cf_tokens.shape
+model.reset_hooks()
+base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
+    prompt_tokens,
+    attention_mask=mask,
+    prepend_bos=False,
+    return_type="logits",
+)
+print(base_logits_by_pos.shape)
+base_ldiff = get_logit_diff(base_logits_by_pos, answer_tokens=answer_tokens, mask=mask)
+cf_logits, cf_cache = model.run_with_cache(
+    cf_tokens, prepend_bos=False, return_type="logits"
+)
+assert isinstance(cf_logits, Tensor)
+cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens, mask=cf_mask)
+metric = lambda logits: (
+    get_logit_diff(logits, answer_tokens=answer_tokens, mask=mask) - base_ldiff
+) / (cf_ldiff - base_ldiff)
+print(pos_dict)
+# %%
+results_dict = dict()
+for pos_label, positions in pos_dict.items():
+    positions = pos_dict[pos_label]
+    pos_tensor = torch.zeros_like(prompt_tokens, dtype=torch.bool)
+    nodes = [
+        Node(node_name="resid_pre", layer=layer, seq_pos=positions)
+        for layer in range(model.cfg.n_layers)
+    ]
+    pos_results = act_patch(
+        model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=True  # type: ignore
+    ).item()
+    results_dict[pos_label] = pos_results
+results_pd = pd.Series(results_dict)
+# %%
+fig = px.bar(results_pd, labels={"index": "Position", "value": "Patching metric"})
+fig.update_layout(showlegend=False)
+fig.show()
+# %%
+print(results_dict)
+# results = torch.stack(results, dim=0)
+# results = einops.rearrange(
+#     results,
+#     "(pos layer) -> layer pos",
+#     layer=model.cfg.n_layers,
+#     pos=prompt_tokens.shape[1],
+# )
+# results = results.cpu().numpy()
+
+# fig = go.Figure(
+#     data=go.Heatmap(
+#         z=results,
+#         x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
+#         y=[f"{i}" for i in range(model.cfg.n_layers)],
+#         colorscale="RdBu",
+#         zmin=0,
+#         zmax=1,
+#         hovertemplate="Layer %{y}<br>Position %{x}<br>Logit diff %{z}<extra></extra>",
+#     ),
+#     layout=dict(
+#         title=f"Patching metric by layer, {model.cfg.model_name}",
+#         xaxis_title="Position",
+#         yaxis_title="Layer",
+#         title_x=0.5,
+#     ),
+# )
 
 
 # %%

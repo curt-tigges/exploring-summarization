@@ -31,7 +31,7 @@ from typing import List, Optional, Callable, Tuple, Dict, Literal, Set
 from rich import print as rprint
 
 from typing import List, Union
-from utils.circuit_analysis import (
+from summarization_utils.circuit_analysis import (
     get_logit_diff,
     residual_stack_to_logit_diff,
     cache_to_logit_diff,

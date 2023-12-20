@@ -28,15 +28,15 @@ from transformer_lens.hook_points import HookPoint
 from tqdm.notebook import tqdm
 import pandas as pd
 from circuitsvis.activations import text_neuron_activations
-from utils.cache import resid_names_filter
-from utils.circuit_analysis import get_logit_diff
-from utils.ablation import (
+from summarization_utils.cache import resid_names_filter
+from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.ablation import (
     ablation_hook_base,
     freeze_attn_pattern_hook,
     convert_to_tensors,
 )
-from utils.datasets import ExperimentDataLoader
-from utils.store import create_file_name, ResultsFile
+from summarization_utils.datasets import ExperimentDataLoader
+from summarization_utils.store import create_file_name, ResultsFile
 
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

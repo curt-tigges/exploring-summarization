@@ -27,8 +27,8 @@ from IPython.display import HTML, display
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from utils.circuit_analysis import get_logit_diff
-from utils.tokenwise_ablation import (
+from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.tokenwise_ablation import (
     compute_ablation_modified_loss,
     load_directions,
     get_random_directions,
@@ -41,7 +41,7 @@ from utils.tokenwise_ablation import (
     loss_fn,
     DEFAULT_DEVICE,
 )
-from utils.datasets import (
+from summarization_utils.datasets import (
     OWTData,
     PileFullData,
     PileSplittedData,
@@ -49,9 +49,9 @@ from utils.datasets import (
     mask_positions,
     construct_exclude_list,
 )
-from utils.neuroscope import plot_top_onesided
-from utils.store import ResultsFile, TensorBlockManager
-from utils.path_patching import act_patch, Node, IterNode, IterSeqPos
+from summarization_utils.neuroscope import plot_top_onesided
+from summarization_utils.store import ResultsFile, TensorBlockManager
+from summarization_utils.path_patching import act_patch, Node, IterNode, IterSeqPos
 
 # %%
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

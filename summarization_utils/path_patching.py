@@ -18,7 +18,7 @@ import re
 # %%
 
 _SeqPos = Optional[Int[Tensor, "batch pos"]]
-SeqPos = Optional[Union[int, List[int], Int[Tensor, "batch *pos"]]]
+SeqPos = Optional[Union[int, List[int], List[List[int]], Int[Tensor, "batch *pos"]]]
 IterSeqPos = Union[SeqPos, Literal["each"]]
 
 
@@ -552,6 +552,13 @@ class IterNode:
         return self.nodes_dict
 
 
+def is_homogeneous(l: list):
+    """Returns True if all elements of the list are the same type/length."""
+    if all([isinstance(x, int) for x in l]):
+        return True
+    return all([len(l[0]) == len(x) for x in l])
+
+
 def get_batch_and_seq_pos_indices(seq_pos, batch_size, seq_len):
     """
     seq_pos can be given in four different forms:
@@ -573,16 +580,37 @@ def get_batch_and_seq_pos_indices(seq_pos, batch_size, seq_len):
     else:
         if isinstance(seq_pos, int):
             seq_pos = [seq_pos for _ in range(batch_size)]
-        if isinstance(seq_pos, list):
+        if isinstance(seq_pos, list) and is_homogeneous(seq_pos):
             seq_pos = t.tensor(seq_pos)
+        elif isinstance(seq_pos, list):
+            # Non-homogeneous list of sequence positions
+            batch_indices = t.tensor(
+                [
+                    batch_idx
+                    for batch_idx, batch_positions in enumerate(seq_pos)
+                    for _ in batch_positions  # type: ignore
+                ]
+            )
+            seq_pos_indices = t.tensor(
+                [pos for batch_positions in seq_pos for pos in batch_positions]  # type: ignore
+            )
+            return batch_indices, seq_pos_indices
         if seq_pos.ndim == 1:
-            seq_pos = seq_pos.unsqueeze(-1)
+            seq_pos = einops.repeat(
+                seq_pos,
+                "seq_pos -> batch seq_pos",
+                batch=batch_size,
+            )
         assert (
             (seq_pos.ndim == 2)
             and (seq_pos.shape[0] == batch_size)
             and (seq_pos.shape[1] <= seq_len)
             and (seq_pos.max() < seq_len)
-        ), "Invalid 'seq_pos' argument."
+        ), (
+            f"Invalid 'seq_pos' argument ndim={seq_pos.ndim}, shape={seq_pos.shape}, "
+            f"batch_size={batch_size}, seq_len={seq_len}, "
+            f"max_seq_pos={seq_pos.max()}"
+        )
         seq_sub_pos_len = seq_pos.shape[1]
         seq_pos_indices = seq_pos
         batch_indices = einops.repeat(

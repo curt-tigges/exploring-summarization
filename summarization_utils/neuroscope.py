@@ -11,8 +11,8 @@ from transformer_lens.utils import tokenize_and_concatenate, get_act_name
 from circuitsvis.activations import text_neuron_activations
 from circuitsvis.topk_samples import topk_samples
 from IPython.display import display
-from utils.cache import resid_names_filter
-from utils.store import ResultsFile
+from summarization_utils.cache import resid_names_filter
+from summarization_utils.store import ResultsFile
 
 
 # Harry Potter in English

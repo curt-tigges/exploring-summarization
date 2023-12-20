@@ -37,17 +37,17 @@ import pandas as pd
 from circuitsvis.activations import text_neuron_activations
 from circuitsvis.topk_samples import topk_samples
 from IPython.display import HTML, display
-from utils.circuit_analysis import get_logit_diff
+from summarization_utils.circuit_analysis import get_logit_diff
 
-from utils.tokenwise_ablation import (
+from summarization_utils.tokenwise_ablation import (
     compute_ablation_modified_loss,
     load_directions,
     get_random_directions,
     get_zeroed_dir_vector,
     get_layerwise_token_mean_activations,
 )
-from utils.datasets import OWTData, PileFullData, PileSplittedData
-from utils.neuroscope import plot_top_onesided
+from summarization_utils.datasets import OWTData, PileFullData, PileSplittedData
+from summarization_utils.neuroscope import plot_top_onesided
 
 # %%
 device = torch.device("cuda")

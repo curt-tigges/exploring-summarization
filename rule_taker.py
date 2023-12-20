@@ -23,6 +23,10 @@ from transformer_lens.utils import (
     get_attention_mask,
 )
 from transformer_lens.hook_points import HookPoint
+from transformer_lens.loading_from_pretrained import (
+    get_pretrained_model_config,
+    get_pretrained_state_dict,
+)
 from tqdm.notebook import tqdm
 import pandas as pd
 from circuitsvis.activations import text_neuron_activations
@@ -31,8 +35,8 @@ from IPython.display import HTML, display
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from utils.circuit_analysis import get_logit_diff
-from utils.tokenwise_ablation import (
+from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.tokenwise_ablation import (
     compute_ablation_modified_loss,
     load_directions,
     get_random_directions,
@@ -45,7 +49,7 @@ from utils.tokenwise_ablation import (
     loss_fn,
     DEFAULT_DEVICE,
 )
-from utils.datasets import (
+from summarization_utils.datasets import (
     OWTData,
     PileFullData,
     PileSplittedData,
@@ -53,9 +57,9 @@ from utils.datasets import (
     mask_positions,
     construct_exclude_list,
 )
-from utils.neuroscope import plot_top_onesided
-from utils.store import ResultsFile, TensorBlockManager
-from utils.path_patching import act_patch, Node, IterNode, IterSeqPos
+from summarization_utils.neuroscope import plot_top_onesided
+from summarization_utils.store import ResultsFile, TensorBlockManager
+from summarization_utils.path_patching import act_patch, Node, IterNode, IterSeqPos
 
 # %%
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -66,9 +70,20 @@ torch.manual_seed(0)
 random.seed(0)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # %%
-# hf_model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
-# hf_tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
-# hf_model.to(device)
+MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.1"
+cfg = get_pretrained_model_config(MODEL_NAME, torch_dtype=torch.float16)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = HookedTransformer(cfg, tokenizer=tokenizer)
+# %%
+hf_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float16)
+# %%
+state_dict = get_pretrained_state_dict(
+    MODEL_NAME, cfg, hf_model, torch_dtype=torch.float16
+)
+# %%
+model.load_state_dict(state_dict, strict=False)
+# %%
+model
 # %%
 model = HookedTransformer.from_pretrained(
     "mistral-7b-instruct",

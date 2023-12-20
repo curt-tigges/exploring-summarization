@@ -8,7 +8,7 @@ from transformer_lens import ActivationCache
 from transformer_lens.utils import get_act_name
 from datasets import Dataset, Features, Sequence, Value
 import einops
-from utils.cache import resid_names_filter
+from summarization_utils.cache import resid_names_filter
 
 
 def handle_position_argument(
