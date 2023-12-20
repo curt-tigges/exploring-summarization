@@ -1095,6 +1095,15 @@ class CounterfactualDataset:
         self._base_ldiff = None
         self._cf_ldiff = None
 
+    def __add__(self, other: "CounterfactualDataset"):
+        return CounterfactualDataset(
+            prompts=self.prompts + other.prompts,
+            answers=self.answers + other.answers,
+            cf_prompts=self.cf_prompts + other.cf_prompts,
+            cf_answers=self.cf_answers + other.cf_answers,
+            model=self.model,
+        )
+
     def __len__(self):
         return len(self.prompts)
 
@@ -1360,7 +1369,12 @@ class CounterfactualDataset:
             f"must be different"
         )
         metric = lambda logits: (
-            get_logit_diff(logits, answer_tokens=self.answer_tokens, mask=self.mask)
+            get_logit_diff(
+                logits,
+                answer_tokens=self.answer_tokens,
+                mask=self.mask,
+                per_prompt=True,
+            )
             - self.base_ldiff
         ) / (self.cf_ldiff - self.base_ldiff)
         pos_dict = get_position_dict(self.prompt_tokens, model=self.model, sep=sep)
