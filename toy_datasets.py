@@ -60,6 +60,7 @@ from summarization_utils.toy_datasets import (
     ToyDeductionTemplate,
     ToyBindingTemplate,
     ToyProfilesTemplate,
+    get_position_dict,
 )
 
 # %%
@@ -81,7 +82,9 @@ model: HookedTransformer = HookedTransformer.from_pretrained(
 )
 assert model.tokenizer is not None
 # %%
-dataset = CounterfactualDataset.from_name("KnownFor", model)
+dataset = CounterfactualDataset.from_name(
+    "KnownFor", model
+) + CounterfactualDataset.from_name("OfCourse", model)
 # dataset = ToyDeductionTemplate(model, max=100, dataset_size=10).to_counterfactual()
 # %%
 dataset.check_lengths_match()
@@ -96,12 +99,14 @@ print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 assert (all_logit_diffs > 0).all()
 assert (cf_logit_diffs < 0).all()
 # %%
+results_pd = dataset.patch_by_position_group(sep=",")
+fig = px.bar(
+    results_pd.mean(axis=0), labels={"index": "Position", "value": "Patching metric"}
+)
+fig.update_layout(showlegend=False)
+fig.show()
+# %%
 pos_layer_results = dataset.patch_by_layer()
 # %%
 dataset.plot_layer_results_per_batch(pos_layer_results)
-# %%
-results_pd = dataset.patch_by_position_group(sep=",").mean(axis=0)
-fig = px.bar(results_pd, labels={"index": "Position", "value": "Patching metric"})
-fig.update_layout(showlegend=False)
-fig.show()
 # %%
