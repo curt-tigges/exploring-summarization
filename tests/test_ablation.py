@@ -2,7 +2,7 @@ import unittest
 import torch
 from transformer_lens.hook_points import HookPoint
 from transformer_lens import ActivationCache
-from utils.ablation import (
+from summarization_utils.ablation import (
     handle_position_argument,
     resample_ablate_component,
     mean_ablate_component,

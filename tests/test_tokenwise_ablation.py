@@ -6,8 +6,8 @@ from typing import List
 from torch.utils.data import Dataset
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import get_act_name
-from utils.datasets import ExperimentDataLoader
-from utils.tokenwise_ablation import (
+from summarization_utils.datasets import ExperimentDataLoader
+from summarization_utils.tokenwise_ablation import (
     find_positions,
     load_directions,
     get_random_directions,
@@ -149,7 +149,7 @@ class TestTokenwise(unittest.TestCase):
         layers_to_ablate = [
             0,
         ]
-        
+
         cached_means = torch.zeros((1, 512))
 
         metrics = compute_ablation_modified_logit_diff(
