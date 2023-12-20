@@ -579,7 +579,7 @@ def get_batch_and_seq_pos_indices(seq_pos, batch_size, seq_len):
         batch_indices = slice(None)
     else:
         if isinstance(seq_pos, int):
-            seq_pos = [seq_pos for _ in range(batch_size)]
+            seq_pos = [seq_pos]
         if isinstance(seq_pos, list) and is_homogeneous(seq_pos):
             seq_pos = t.tensor(seq_pos)
         elif isinstance(seq_pos, list):

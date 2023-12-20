@@ -42,9 +42,9 @@ KNOWN_FOR_TUPLES = [
         " potato",
     ),
     (
-        "Known for being a wonder of the world, located in Australia, the",
+        "Known for being a wonder of the world located in Australia, the",
         " Great",
-        "Known for being a wonder of the world, located in India, the",
+        "Known for being a wonder of the world located in India, the",
         " Taj",
     ),
     (
@@ -296,6 +296,11 @@ def get_position_dict(
                 full_pos_dict[k].append(v)
             else:
                 full_pos_dict[k] = [v]
+    for pos_key, pos_values in full_pos_dict.items():
+        assert len(pos_values) == batch_size, (
+            f"Position {pos_key} has {len(pos_values)} values, "
+            f"expected {batch_size}"
+        )
     return full_pos_dict
 
 
@@ -1090,6 +1095,9 @@ class CounterfactualDataset:
         self._base_ldiff = None
         self._cf_ldiff = None
 
+    def __len__(self):
+        return len(self.prompts)
+
     @property
     def prompt_tokens(self) -> Int[Tensor, "batch seq_len"]:
         if self._prompt_tokens is None:
@@ -1329,21 +1337,25 @@ class CounterfactualDataset:
                 zmax=1,
                 hovertemplate="Layer %{y}<br>Position %{x}<br>Logit diff %{z}<extra></extra>",
             )
-            fig.add_trace(hm, row=row, col=1)
+            fig.add_trace(hm, row=row + 1, col=1)
+            # set x and y axes titles of each trace
+            fig.update_xaxes(title_text="Position", row=row + 1, col=1)
+            fig.update_yaxes(title_text="Layer", row=row + 1, col=1)
         fig.update_layout(
             title_x=0.5,
             title=f"Patching metric by layer and position, {self.model.cfg.model_name}",
-            xaxis_title="Position",
-            yaxis_title="Layer",
             width=800,
             height=400 * len(results),
+            overwrite=True,
         )
         return fig
 
-    def patch_by_position_group(self, sep=",") -> pd.Series:
+    def patch_by_position_group(
+        self, sep=",", verbose: bool = True
+    ) -> Float[pd.DataFrame, "batch group"]:
         if self.base_ldiff.shape[0] == 0:
             self.compute_logit_diffs(vectorized=True)
-        assert self.base_ldiff != self.cf_ldiff, (
+        assert (self.base_ldiff != self.cf_ldiff).all(), (
             f"Base logit diff {self.base_ldiff} and cf logit diff {self.cf_ldiff} "
             f"must be different"
         )
@@ -1354,16 +1366,15 @@ class CounterfactualDataset:
         pos_dict = get_position_dict(self.prompt_tokens, model=self.model, sep=sep)
         results_dict = dict()
         for pos_label, positions in pos_dict.items():
-            positions = pos_dict[pos_label]
             nodes = [
                 Node(node_name="resid_pre", layer=layer, seq_pos=positions)
                 for layer in range(self.model.cfg.n_layers)
             ]
             pos_results = act_patch(
-                self.model, self.prompt_tokens, nodes, metric, new_input=self.cf_tokens, verbose=True  # type: ignore
-            ).item()
-            results_dict[pos_label] = pos_results
-        return pd.Series(results_dict)
+                self.model, self.prompt_tokens, nodes, metric, new_input=self.cf_tokens, verbose=verbose  # type: ignore
+            )
+            results_dict[pos_label] = pos_results.cpu().numpy()
+        return pd.DataFrame(results_dict)
 
     def patch_at_position(
         self, positions: List[int] | List[List[int]], verbose: bool = True
