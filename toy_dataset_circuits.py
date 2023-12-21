@@ -80,6 +80,14 @@ from summarization_utils.path_patching import act_patch, Node, IterNode, IterSeq
 from summarization_utils.visualization import get_attn_head_patterns, imshow_p, plot_attention_heads, scatter_attention_and_contribution_simple
 from summarization_utils.visualization import get_attn_pattern, plot_attention
 
+from summarization_utils.toy_datasets import (
+    CounterfactualDataset,
+    ToyDeductionTemplate,
+    ToyBindingTemplate,
+    ToyProfilesTemplate,
+    get_position_dict,
+)
+
 # %%
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -104,99 +112,77 @@ assert model.tokenizer is not None
 # ### Knowledge Dataset
 
 # %%
-PROMPTS = [
-    ("Known for being the most popular fruit in the world, the", " apple"),
-    ("Known for being the most popular vegetable in the world, the", " humble"),
-    ("Known for being the most popular car in the world, the", " Volkswagen"),
-    ("Known for being the most popular country in the world, the", " United"),
-    ("Known for being the most popular city in the world, the", " Big"),
-    ("Known for being the most popular animal in the world, the", " dog"),
-]
+dataset = ToyDeductionTemplate(model, dataset_size=10, max=10)
 
 # %%
-orig_prompts = [p[0] for p in PROMPTS]
-orig_tokens = model.to_tokens(orig_prompts, prepend_bos=True)
-flip_tokens = orig_tokens.roll(-1, dims=0)
+dataset.prompts
 
 # %%
-batch_size = len(orig_prompts)
-n_pairs = 1
+dataset.cf_prompts
 
-def create_patching_dataset(prompts_and_answers):
-    orig_prompts = [p[0] for p in prompts_and_answers]
-    orig_tokens = model.to_tokens(orig_prompts, prepend_bos=True)
-    flip_tokens = orig_tokens.roll(-1, dims=0)
-    orig_answers = [p[1] for p in prompts_and_answers]
-    flip_answers = orig_answers[1:] + [orig_answers[0]]
+# %%
+dataset.cf_answers
 
-    print(orig_tokens.shape)
-    print(flip_tokens.shape)
-    print(orig_answers)
-    print(flip_answers)
+# %%
+all_logit_diffs, cf_logit_diffs = dataset.compute_logit_diffs()
+print(f"Original mean: {all_logit_diffs.mean():.2f}")
+print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 
-    if isinstance(orig_answers[0], List):
-        answer_tokens = torch.empty(
-                (batch_size, min(n_pairs, len(orig_answers[0])), 2), 
-                device=device, 
-                dtype=torch.long
-            )
-    else:
-        answer_tokens = torch.empty(
-                (batch_size, 1, 2), 
-                device=device, 
-                dtype=torch.long
-            )
-        
-    for i in range(len(orig_prompts)):
-        if isinstance(orig_answers[i], List):
-            for pair_idx in range(n_pairs):
-                orig_ans_tok = model.to_tokens(orig_answers[i][pair_idx], prepend_bos=False)
-                flip_ans_tok = model.to_tokens(flip_answers[i][pair_idx], prepend_bos=False)
-                answer_tokens[i, pair_idx, 0] = orig_ans_tok
-                answer_tokens[i, pair_idx, 1] = flip_ans_tok
-        else:
-            orig_ans_tok = model.to_tokens(orig_answers[i], prepend_bos=False)
-            flip_ans_tok = model.to_tokens(flip_answers[i], prepend_bos=False)
-            answer_tokens[i, 0, 0] = orig_ans_tok
-            answer_tokens[i, 0, 1] = flip_ans_tok
+# %%
+ans_tokens = dataset.answer_tokens.unsqueeze(1).to(device)
 
+# %%
+model.to_str_tokens(dataset.answer_tokens[0])
 
-    
-    orig_tokens = orig_tokens.to(device)
-    flip_tokens = flip_tokens.to(device)
+# %%
+assert (all_logit_diffs > 0).all()
+assert (cf_logit_diffs < 0).all()
 
-    return orig_tokens, flip_tokens, answer_tokens
+# %%
+ans_tokens.shape, dataset.prompt_tokens.shape, dataset.cf_tokens.shape
 
-orig_prompt_toks, flip_prompt_toks, answer_tokens = create_patching_dataset(PROMPTS)
+# %%
+results_pd = dataset.patch_by_position_group(sep=",")
+fig = px.bar(
+    results_pd.mean(axis=0), labels={"index": "Position", "value": "Patching metric"}
+)
+fig.update_layout(showlegend=False)
+fig.show()
+# %%
+pos_layer_results = dataset.patch_by_layer()
+# %%
+dataset.plot_layer_results_per_batch(pos_layer_results)
 
 # %% [markdown]
 # #### Activation Patching
 
 # %%
-for i in range(0, len(orig_prompt_toks)):
-    logits, _ = model.run_with_cache(orig_prompt_toks[i])
-    log_diff = get_logit_diff(logits, answer_tokens[i].unsqueeze(0))
-    #if log_diff < 0.1:
-    print(model.to_string(orig_prompt_toks[i]))
-    print(model.to_string(flip_prompt_toks[i]))
-    print(model.to_str_tokens(answer_tokens[i]))
-    print(log_diff, "\n")
+for i in range(dataset.prompt_tokens.shape[0]):
+    print((model.to_string(dataset.prompt_tokens[i]), model.to_string(dataset.cf_tokens[i])))
 
 # %%
-orig_logits, orig_cache = model.run_with_cache(orig_prompt_toks)
-orig_logit_diff = get_logit_diff(orig_logits, answer_tokens, per_prompt=False)
+orig_logit_diff = all_logit_diffs.mean()
 orig_logit_diff
 
 # %%
-flip_logits, flip_cache = model.run_with_cache(flip_prompt_toks)
-flip_logit_diff = get_logit_diff(flip_logits, answer_tokens, per_prompt=False)
+orig_logits, orig_cache = model.run_with_cache(dataset.prompt_tokens)
+orig_logit_diff = get_logit_diff(orig_logits, ans_tokens, per_prompt=False)
+orig_logit_diff
+
+# %%
+flip_logit_diff = cf_logit_diffs.mean()
+flip_logit_diff
+
+# %%
+flip_logits, flip_cache = model.run_with_cache(dataset.cf_tokens)
+flip_logit_diff = get_logit_diff(flip_logits, ans_tokens, per_prompt=False)
 flip_logit_diff
 
 
 # %%
 def logit_diff_denoising(
     logits: Float[Tensor, "batch seq d_vocab"],
-    answer_tokens: Float[Tensor, "batch n_pairs 2"] = answer_tokens,
+    answer_tokens: Float[Tensor, "batch n_pairs 2"] = ans_tokens,
     flipped_logit_diff: float = flip_logit_diff,
     clean_logit_diff: float = orig_logit_diff,
     return_tensor: bool = False,
@@ -217,7 +203,7 @@ def logit_diff_noising(
         logits: Float[Tensor, "batch seq d_vocab"],
         clean_logit_diff: float = orig_logit_diff,
         corrupted_logit_diff: float = flip_logit_diff,
-        answer_tokens: Float[Tensor, "batch n_pairs 2"] = answer_tokens,
+        answer_tokens: Float[Tensor, "batch n_pairs 2"] = ans_tokens,
         return_tensor: bool = False,
     ) -> float:
         '''
@@ -232,15 +218,13 @@ def logit_diff_noising(
         else:
             return ld.item()
 
-logit_diff_denoising_tensor = partial(logit_diff_denoising, return_tensor=True)
-logit_diff_noising_tensor = partial(logit_diff_noising, return_tensor=True)
 
 # %%
 # patching at each (layer, sequence position) for each of (resid_pre, attn_out, mlp_out) in turn
 
 results = act_patch(
     model=model,
-    orig_input=flip_prompt_toks,
+    orig_input=dataset.cf_tokens,
     new_cache=orig_cache,
     patching_nodes=IterNode(["resid_pre", "attn_out", "mlp_out"], seq_pos="each"),
     patching_metric=logit_diff_denoising,
@@ -254,7 +238,7 @@ with open("results/tensors/2_8b_comma_test/content_act_patch_resid_layer_output.
     act_patch_resid_layer_output = pickle.load(f)
 
 assert act_patch_resid_layer_output.keys() == {"resid_pre", "attn_out", "mlp_out"}
-labels = [f"{tok} {i}" for i, tok in enumerate(model.to_str_tokens(orig_prompt_toks[0]))]
+labels = [f"{tok} {i}" for i, tok in enumerate(model.to_str_tokens(dataset.prompt_tokens[0]))]
 imshow_p(
     torch.stack([r.T for r in act_patch_resid_layer_output.values()]) * 100, # we transpose so layer is on the y-axis
     facet_col=0,
@@ -267,8 +251,6 @@ imshow_p(
     border=True,
     width=1500,
     height=600,
-    zmin=-50,
-    zmax=50,
     margin={"r": 100, "l": 100}
 )
 
@@ -378,7 +360,7 @@ answer_tokens = torch.stack([model.to_tokens([PROMPTS[i][1], flipped_list[i][1]]
 
 # %%
 answer_tokens = answer_tokens.transpose(1, 2)
-answer_tokens.shape
+answer_tokens.shape, orig_prompt_toks.shape, flip_prompt_toks.shape
 
 # %%
 from transformers import AutoTokenizer
