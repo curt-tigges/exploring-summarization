@@ -8,7 +8,11 @@ from transformer_lens import HookedTransformer
 from transformer_lens.utils import get_attention_mask
 from typing import Tuple, Dict
 import unittest
-from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.counterfactual_patching import (
+    patch_by_position_group,
+    patch_at_position,
+)
+from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import act_patch, Node
 from summarization_utils.toy_datasets import CounterfactualDataset
 
@@ -79,8 +83,8 @@ class TestToyDatasets(unittest.TestCase):
         ds = CounterfactualDataset.from_tuples(TEST_TUPLES, self.model)
         pos_dict = get_position_dict(ds.prompt_tokens, model=ds.model, sep=sep)
         positions = pos_dict[key]
-        results_pd = ds.patch_by_position_group(sep=sep)
-        results = ds.patch_at_position(positions)
+        results_pd = patch_by_position_group(ds, sep=sep)
+        results = patch_at_position(ds, positions)
         self.assertTrue(np.isclose(results_pd[key], results.item()))
 
     def test_reconciliation(self):
@@ -88,7 +92,6 @@ class TestToyDatasets(unittest.TestCase):
         CF_PROMPTS = [d[2] for d in TEST_TUPLES]
         prompt_tokens = self.model.to_tokens(PROMPTS, prepend_bos=True)
         cf_tokens = self.model.to_tokens(CF_PROMPTS, prepend_bos=True)
-        comma_id = self.model.to_single_token(",")
         pos_dict = get_position_dict(prompt_tokens, self.model, sep=",")
         answer_tokens = torch.tensor(
             [
@@ -152,7 +155,7 @@ class TestToyDatasets(unittest.TestCase):
             results_dict[pos_label] = pos_results
         results_pd_manual = pd.DataFrame(results_dict)
         ds = CounterfactualDataset.from_tuples(TEST_TUPLES, self.model)
-        results_pd_new = ds.patch_by_position_group(sep=",")
+        results_pd_new = patch_by_position_group(ds, sep=",")
         self.assertTrue(np.allclose(results_pd_manual, results_pd_new))
 
 

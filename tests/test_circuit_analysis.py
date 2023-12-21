@@ -31,12 +31,14 @@ from typing import List, Optional, Callable, Tuple, Dict, Literal, Set
 from rich import print as rprint
 
 from typing import List, Union
-from summarization_utils.circuit_analysis import (
+from summarization_utils.direction_patching import (
+    project_to_subspace,
+    create_cache_for_dir_patching,
+)
+from summarization_utils.patching_metrics import (
     get_logit_diff,
     residual_stack_to_logit_diff,
     cache_to_logit_diff,
-    project_to_subspace,
-    create_cache_for_dir_patching,
     get_prob_diff,
     get_final_non_pad_token,
 )

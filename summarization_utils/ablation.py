@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable, Dict, List, Literal, Optional, Union
 import torch
 from torch import Tensor
@@ -9,6 +10,46 @@ from transformer_lens.utils import get_act_name
 from datasets import Dataset, Features, Sequence, Value
 import einops
 from summarization_utils.cache import resid_names_filter
+
+
+def ablate_top_head_hook(
+    z: Float[Tensor, "batch pos head_index d_head"], hook, head_idx=0
+):
+    """Hook to ablate the top head of a given layer.
+
+    Args:
+        z (TT["batch", "pos", "head_index", "d_head"]): Attention weights.
+        hook ([type]): Hook.
+        head_idx (int, optional): Head index to ablate. Defaults to 0.
+
+    Returns:
+        TT["batch", "pos", "head_index", "d_head"]: Attention weights.
+    """
+    z[:, -1, head_idx, :] = 0
+    return z
+
+
+def get_knockout_perf_drop(model, heads_to_ablate, clean_tokens, metric):
+    """Gets the performance drop for a given model and heads to ablate.
+
+    Args:
+        model (nn.Module): Model to knockout.
+        heads_to_ablate (List[Tuple[int, int]]): List of tuples of layer and head indices to knockout.
+        clean_tokens (Tensor): Clean tokens.
+        answer_token_indices (Tensor): Answer token indices.
+
+    Returns:
+        Tensor: Performance drop.
+    """
+    # Adds a hook into global model state
+    for layer, head in heads_to_ablate:
+        ablate_head_hook = partial(ablate_top_head_hook, head_idx=head)
+        model.blocks[layer].attn.hook_z.add_hook(ablate_head_hook)
+
+    ablated_logits, ablated_cache = model.run_with_cache(clean_tokens)
+    ablated_logit_diff = metric(ablated_logits)
+
+    return ablated_logit_diff
 
 
 def handle_position_argument(

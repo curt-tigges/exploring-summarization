@@ -9,7 +9,7 @@ from typing import Callable, Union, List, Tuple
 from transformer_lens.hook_points import HookPoint
 from transformer_lens import HookedTransformer, ActivationCache
 import wandb
-from summarization_utils.circuit_analysis import get_logit_diff, logit_diff_denoising
+from summarization_utils.patching_metrics import get_logit_diff, logit_diff_denoising
 from summarization_utils.prompts import PromptType, get_dataset
 from summarization_utils.residual_stream import get_resid_name
 from summarization_utils.store import save_array
