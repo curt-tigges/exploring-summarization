@@ -51,6 +51,59 @@ import plotly.express as px
 import circuitsvis as cv
 
 
+def visualize_tensor(tensor, labels, zmin=-1.0, zmax=1.0):
+    """Visualizes a 3D tensor as a series of heatmaps.
+
+    Args:
+        tensor (torch.Tensor): Tensor to visualize.
+        labels (List[str]): List of labels for each slice in the tensor.
+        zmin (float, optional): Minimum value for the color scale. Defaults to -1.0.
+        zmax (float, optional): Maximum value for the color scale. Defaults to 1.0.
+
+    Raises:
+        AssertionError: If the number of labels does not match the number of slices in the tensor.
+    """
+    assert (
+        len(labels) == tensor.shape[-1]
+    ), "The number of labels should match the number of slices in the tensor."
+
+    def plot_slice(selected_slice):
+        """Plots a single slice of the tensor."""
+        fig = go.FigureWidget(
+            data=go.Heatmap(
+                z=tensor[:, :, selected_slice].numpy(),
+                zmin=zmin,
+                zmax=zmax,
+                colorscale="RdBu",
+            ),
+            layout=go.Layout(
+                title=f"Slice: {selected_slice} - Step: {labels[selected_slice]}",
+                yaxis=dict(autorange="reversed"),
+            ),
+        )
+        return fig
+
+    def on_slider_change(change):
+        """Updates the plot when the slider is moved."""
+        selected_slice = change["new"]
+        fig = plot_slice(selected_slice)
+        output.clear_output(wait=True)
+        with output:
+            display(fig)
+
+    slider = widgets.IntSlider(
+        min=0, max=tensor.shape[2] - 1, step=1, value=0, description="Slice:"
+    )
+    slider.observe(on_slider_change, names="value")
+    display(slider)
+
+    output = widgets.Output()
+    display(output)
+
+    with output:
+        display(plot_slice(0))
+
+
 def plot_attention_heads(tensor, title="", top_n=0, range_x=[0, 2.5], threshold=0.02):
     # convert the PyTorch tensor to a numpy array
     values = tensor.cpu().detach().numpy()
@@ -126,7 +179,9 @@ def two_lines(tensor1, tensor2, renderer=None, **kwargs):
 
 
 def get_attn_head_patterns(
-    model: HookedTransformer, prompt: Union[str, List[int]], attn_heads: List[Tuple[int]]
+    model: HookedTransformer,
+    prompt: Union[str, List[int]],
+    attn_heads: List[Tuple[int]],
 ):
     if isinstance(prompt, str):
         prompt = model.to_tokens(prompt)
@@ -144,9 +199,9 @@ def get_attn_head_patterns(
 
 
 def get_attn_pattern(
-    model: HookedTransformer, 
-    prompt: str, 
-    attn_heads: List[Tuple[int]], 
+    model: HookedTransformer,
+    prompt: str,
+    attn_heads: List[Tuple[int]],
     cache: ActivationCache = None,
     weighted: bool = True,
 ) -> Tuple[List[str], Float[Tensor, "head dest src"], List[str]]:
@@ -156,12 +211,14 @@ def get_attn_pattern(
     head_list = []
     head_name_list = []
     for layer, head in attn_heads:
-        attn: Float[Tensor, "dest src"] = cache["pattern", layer, "attn"][:, head, :, :].mean(
-            dim=0, keepdim=False
-        )
+        attn: Float[Tensor, "dest src"] = cache["pattern", layer, "attn"][
+            :, head, :, :
+        ].mean(dim=0, keepdim=False)
         assert torch.allclose(attn.sum(dim=-1), torch.ones_like(attn.sum(dim=-1)))
         if weighted:
-            v: Float[Tensor, "src"] = cache["v", layer][:, :, head, :].norm(dim=-1).mean(dim=0, keepdim=False)
+            v: Float[Tensor, "src"] = (
+                cache["v", layer][:, :, head, :].norm(dim=-1).mean(dim=0, keepdim=False)
+            )
             attn: Float[Tensor, "dest src"] = einops.einsum(
                 attn, v, "dest src, src -> dest src"
             )
@@ -173,18 +230,21 @@ def get_attn_pattern(
     return tokens, attention_pattern, head_name_list
 
 
-
 def plot_attention(
-    model: HookedTransformer, prompt: str, attn_heads: List[Tuple[int]], 
-    cache: ActivationCache = None, weighted: bool = True, 
-    max_value: float = 1.0, min_value: float = 0.0
+    model: HookedTransformer,
+    prompt: str,
+    attn_heads: List[Tuple[int]],
+    cache: ActivationCache = None,
+    weighted: bool = True,
+    max_value: float = 1.0,
+    min_value: float = 0.0,
 ):
     tokens, attention_pattern, head_name_list = get_attn_pattern(
         model, prompt, attn_heads, cache, weighted
     )
     return cv.attention.attention_heads(
-        tokens=tokens, 
-        attention=attention_pattern, 
+        tokens=tokens,
+        attention=attention_pattern,
         attention_head_names=head_name_list,
         max_value=max_value,
         min_value=min_value,
@@ -201,7 +261,6 @@ def scatter_attention_and_contribution(
     return_vals=False,
     return_fig=False,
 ):
-
     df = []
 
     layer, head_idx = head
@@ -260,6 +319,7 @@ def scatter_attention_and_contribution(
     else:
         fig.show()
 
+
 def scatter_attention_and_contribution_sentiment(
     model,
     head,
@@ -269,7 +329,6 @@ def scatter_attention_and_contribution_sentiment(
     return_vals=False,
     return_fig=False,
 ):
-
     df = []
 
     layer, head_idx = head
@@ -296,12 +355,13 @@ def scatter_attention_and_contribution_sentiment(
 
         # Get the attention probability to the answer
         prob = attn[0, -1, positions[i]]
-        sentiment = "Positive" if i%2==0 else "Negative"
+        sentiment = "Positive" if i % 2 == 0 else "Negative"
         df.append([prob, dot, f"{sentiment} Sentiment", prompts[i]])
 
     # Plot the results
     viz_df = pd.DataFrame(
-        df, columns=[f"Attn Prob on Word", f"Dot w Sentiment Embed", "Word Type", "text"]
+        df,
+        columns=[f"Attn Prob on Word", f"Dot w Sentiment Embed", "Word Type", "text"],
     )
     fig = px.scatter(
         viz_df,
@@ -330,7 +390,6 @@ def scatter_attention_and_contribution_simple(
     return_vals=False,
     return_fig=False,
 ):
-
     df = []
 
     layer, head_idx = head
@@ -361,7 +420,8 @@ def scatter_attention_and_contribution_simple(
 
     # Plot the results
     viz_df = pd.DataFrame(
-        df, columns=[f"Attn Prob on Word", f"Dot w Sentiment Embed", "Word Type", "text"]
+        df,
+        columns=[f"Attn Prob on Word", f"Dot w Sentiment Embed", "Word Type", "text"],
     )
     fig = px.scatter(
         viz_df,
@@ -381,7 +441,6 @@ def scatter_attention_and_contribution_simple(
         fig.show()
 
 
-
 def scatter_attention_and_contribution_logic(
     model,
     head,
@@ -390,7 +449,6 @@ def scatter_attention_and_contribution_logic(
     return_vals=False,
     return_fig=False,
 ):
-
     df = []
 
     layer, head_idx = head
@@ -449,11 +507,41 @@ def scatter_attention_and_contribution_logic(
     else:
         fig.show()
 
+
 update_layout_set = {
-    "xaxis_range", "yaxis_range", "hovermode", "xaxis_title", "yaxis_title", "colorbar", "colorscale", "coloraxis", "title_x", "bargap", "bargroupgap", "xaxis_tickformat",
-    "yaxis_tickformat", "title_y", "legend_title_text", "xaxis_showgrid", "xaxis_gridwidth", "xaxis_gridcolor", "yaxis_showgrid", "yaxis_gridwidth", "yaxis_gridcolor",
-    "showlegend", "xaxis_tickmode", "yaxis_tickmode", "xaxis_tickangle", "yaxis_tickangle", "margin", "xaxis_visible", "yaxis_visible", "bargap", "bargroupgap"
+    "xaxis_range",
+    "yaxis_range",
+    "hovermode",
+    "xaxis_title",
+    "yaxis_title",
+    "colorbar",
+    "colorscale",
+    "coloraxis",
+    "title_x",
+    "bargap",
+    "bargroupgap",
+    "xaxis_tickformat",
+    "yaxis_tickformat",
+    "title_y",
+    "legend_title_text",
+    "xaxis_showgrid",
+    "xaxis_gridwidth",
+    "xaxis_gridcolor",
+    "yaxis_showgrid",
+    "yaxis_gridwidth",
+    "yaxis_gridcolor",
+    "showlegend",
+    "xaxis_tickmode",
+    "yaxis_tickmode",
+    "xaxis_tickangle",
+    "yaxis_tickangle",
+    "margin",
+    "xaxis_visible",
+    "yaxis_visible",
+    "bargap",
+    "bargroupgap",
 }
+
 
 def imshow_p(tensor, renderer=None, save_path=None, **kwargs):
     kwargs_post = {k: v for k, v in kwargs.items() if k in update_layout_set}
@@ -467,23 +555,24 @@ def imshow_p(tensor, renderer=None, save_path=None, **kwargs):
     fig = px.imshow(utils.to_numpy(tensor), color_continuous_midpoint=0.0, **kwargs_pre)
     if facet_labels:
         for i, label in enumerate(facet_labels):
-            fig.layout.annotations[i]['text'] = label
+            fig.layout.annotations[i]["text"] = label
     if border:
-        fig.update_xaxes(showline=True, linewidth=1, linecolor='black', mirror=True)
-        fig.update_yaxes(showline=True, linewidth=1, linecolor='black', mirror=True)
+        fig.update_xaxes(showline=True, linewidth=1, linecolor="black", mirror=True)
+        fig.update_yaxes(showline=True, linewidth=1, linecolor="black", mirror=True)
     # things like `xaxis_tickmode` should be applied to all subplots. This is super janky lol but I'm under time pressure
     for setting in ["tickangle"]:
-      if f"xaxis_{setting}" in kwargs_post:
-          i = 2
-          while f"xaxis{i}" in fig["layout"]:
-            kwargs_post[f"xaxis{i}_{setting}"] = kwargs_post[f"xaxis_{setting}"]
-            i += 1
+        if f"xaxis_{setting}" in kwargs_post:
+            i = 2
+            while f"xaxis{i}" in fig["layout"]:
+                kwargs_post[f"xaxis{i}_{setting}"] = kwargs_post[f"xaxis_{setting}"]
+                i += 1
     fig.update_layout(**kwargs_post)
     fig.show(renderer=renderer)
 
     # Save the figure as a PDF if save_path is provided
     if save_path:
         pio.write_image(fig, save_path)
+
 
 def hist_p(tensor, renderer=None, **kwargs):
     kwargs_post = {k: v for k, v in kwargs.items() if k in update_layout_set}

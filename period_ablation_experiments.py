@@ -37,7 +37,7 @@ import pandas as pd
 from circuitsvis.activations import text_neuron_activations
 from circuitsvis.topk_samples import topk_samples
 from IPython.display import HTML, display
-from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.patching_metrics import get_logit_diff
 
 from summarization_utils.tokenwise_ablation import (
     compute_ablation_modified_loss,

@@ -11,7 +11,7 @@ import torch
 from torch import Tensor
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import test_prompt, get_attention_mask
-from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import Node, IterNode, act_patch
 from abc import ABC, abstractmethod
 
@@ -211,97 +211,6 @@ CODE_TUPLES = [
         " max",
     ),
 ]
-
-
-def patch_prompt_by_layer(
-    prompt: str,
-    answer: str,
-    cf_prompt: str,
-    cf_answer: str,
-    model: HookedTransformer,
-    prepend_bos: bool = True,
-) -> Float[np.ndarray, "layer pos"]:
-    prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
-    cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
-    answer_id = model.to_single_token(answer)
-    cf_answer_id = model.to_single_token(cf_answer)
-    answer_tokens = torch.tensor(
-        [answer_id, cf_answer_id], dtype=torch.int64, device=model.cfg.device
-    ).unsqueeze(0)
-    assert prompt_tokens.shape == cf_tokens.shape, (
-        f"Prompt and counterfactual prompt must have the same shape, "
-        f"for prompt {prompt} "
-        f"got {prompt_tokens.shape} and {cf_tokens.shape}"
-    )
-    model.reset_hooks(including_permanent=True)
-    base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
-        prompt_tokens,
-        prepend_bos=False,
-        return_type="logits",
-    )
-    base_logits: Float[Tensor, "... d_vocab"] = base_logits_by_pos[:, -1, :]
-    base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
-    cf_logits, cf_cache = model.run_with_cache(
-        cf_tokens, prepend_bos=False, return_type="logits"
-    )
-    assert isinstance(cf_logits, Tensor)
-    cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens)
-    nodes = IterNode(node_names=["resid_pre"], seq_pos="each")
-    metric = lambda logits: (
-        get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
-    ) / (cf_ldiff - base_ldiff)
-    results = act_patch(
-        model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=True
-    )[
-        "resid_pre"
-    ]  # type: ignore
-    results = torch.stack(results, dim=0)  # type: ignore
-    results = einops.rearrange(
-        results,
-        "(pos layer) -> layer pos",
-        layer=model.cfg.n_layers,
-        pos=prompt_tokens.shape[1],
-    )
-    results = results.cpu().numpy()
-    return results
-
-
-def get_position_dict(
-    tokens: Float[Tensor, "batch seq_len"], model: HookedTransformer, sep=","
-) -> Dict[str, List[List[int]]]:
-    """
-    Returns a dictionary of positions of clauses and separators
-    e.g. {"clause_0": [[0, 1, 2]], "sep_0": [[3]], "clause_1": [[4, 5, 6]]}
-    """
-    sep_id = model.to_single_token(sep)
-    batch_size, seq_len = tokens.shape
-    full_pos_dict = dict()
-    for b in range(batch_size):
-        batch_pos_dict = {}
-        sep_count = 0
-        current_clause = []
-        for s in range(seq_len):
-            if tokens[b, s] == sep_id:
-                batch_pos_dict[f"clause_{sep_count}"] = current_clause
-                batch_pos_dict[f"sep_{sep_count}"] = [s]
-                sep_count += 1
-                current_clause = []
-                continue
-            else:
-                current_clause.append(s)
-        if current_clause:
-            batch_pos_dict[f"clause_{sep_count}"] = current_clause
-        for k, v in batch_pos_dict.items():
-            if k in full_pos_dict:
-                full_pos_dict[k].append(v)
-            else:
-                full_pos_dict[k] = [v]
-    for pos_key, pos_values in full_pos_dict.items():
-        assert len(pos_values) == batch_size, (
-            f"Position {pos_key} has {len(pos_values)} values, "
-            f"expected {batch_size}"
-        )
-    return full_pos_dict
 
 
 class TemplaticDataset(ABC):
@@ -1107,6 +1016,18 @@ class CounterfactualDataset:
     def __len__(self):
         return len(self.prompts)
 
+    def shuffle(self, seed: int = 0) -> "CounterfactualDataset":
+        random.seed(seed)
+        index = list(range(len(self)))
+        random.shuffle(index)
+        return CounterfactualDataset(
+            prompts=[self.prompts[i] for i in index],
+            answers=[self.answers[i] for i in index],
+            cf_prompts=[self.cf_prompts[i] for i in index],
+            cf_answers=[self.cf_answers[i] for i in index],
+            model=self.model,
+        )
+
     @property
     def prompt_tokens(self) -> Int[Tensor, "batch seq_len"]:
         if self._prompt_tokens is None:
@@ -1221,6 +1142,16 @@ class CounterfactualDataset:
         )
 
     @classmethod
+    def empty(cls, model: HookedTransformer):
+        return cls(
+            prompts=[],
+            answers=[],
+            cf_prompts=[],
+            cf_answers=[],
+            model=model,
+        )
+
+    @classmethod
     def from_name(cls, name: str, model: HookedTransformer):
         if name == "KnownFor":
             return cls.from_tuples(KNOWN_FOR_TUPLES, model)
@@ -1228,6 +1159,16 @@ class CounterfactualDataset:
             return cls.from_tuples(OF_COURSE_TUPLES, model)
         elif name == "Code":
             return cls.from_tuples(CODE_TUPLES, model)
+        elif name == "BooleanNegator":
+            return BooleanNegatorDataset(model).to_counterfactual()
+        elif name == "BooleanOperator":
+            return BooleanOperatorDataset(model).to_counterfactual()
+        elif name == "ToyBinding":
+            return ToyBindingTemplate(model).to_counterfactual()
+        elif name == "ToyDeduction":
+            return ToyDeductionTemplate(model).to_counterfactual()
+        elif name == "ToyProfiles":
+            return ToyProfilesTemplate(model).to_counterfactual()
         else:
             raise ValueError(f"Unknown dataset name {name}")
 
@@ -1316,122 +1257,3 @@ class CounterfactualDataset:
             return self._compute_logit_diffs_vectorized()
         else:
             return self._compute_logit_diffs_loop()
-
-    def patch_by_layer(self) -> List[Float[np.ndarray, "layer pos"]]:
-        results_list = []
-        for prompt, answer, cf_prompt, cf_answer in self:
-            prompt_results = patch_prompt_by_layer(
-                prompt,
-                answer,
-                cf_prompt,
-                cf_answer,
-                model=self.model,
-                prepend_bos=True,
-            )
-            results_list.append(prompt_results)
-        return results_list
-
-    def plot_layer_results_per_batch(
-        self, results: List[Float[np.ndarray, "layer pos"]]
-    ) -> go.Figure:
-        fig = make_subplots(rows=len(results), cols=1)
-        for row, (prompt, result) in enumerate(zip(self.prompts, results)):
-            prompt_str_tokens = self.model.to_str_tokens(prompt)
-            hm = go.Heatmap(
-                z=result,
-                x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
-                y=[f"{i}" for i in range(self.model.cfg.n_layers)],
-                colorscale="RdBu",
-                zmin=0,
-                zmax=1,
-                hovertemplate="Layer %{y}<br>Position %{x}<br>Logit diff %{z}<extra></extra>",
-            )
-            fig.add_trace(hm, row=row + 1, col=1)
-            # set x and y axes titles of each trace
-            fig.update_xaxes(title_text="Position", row=row + 1, col=1)
-            fig.update_yaxes(title_text="Layer", row=row + 1, col=1)
-        fig.update_layout(
-            title_x=0.5,
-            title=f"Patching metric by layer and position, {self.model.cfg.model_name}",
-            width=800,
-            height=400 * len(results),
-            overwrite=True,
-        )
-        return fig
-
-    def patch_by_position_group(
-        self, sep=",", verbose: bool = True
-    ) -> Float[pd.DataFrame, "batch group"]:
-        if self.base_ldiff.shape[0] == 0:
-            self.compute_logit_diffs(vectorized=True)
-        assert (self.base_ldiff != self.cf_ldiff).all(), (
-            f"Base logit diff {self.base_ldiff} and cf logit diff {self.cf_ldiff} "
-            f"must be different"
-        )
-        metric = lambda logits: (
-            get_logit_diff(
-                logits,
-                answer_tokens=self.answer_tokens,
-                mask=self.mask,
-                per_prompt=True,
-            )
-            - self.base_ldiff
-        ) / (self.cf_ldiff - self.base_ldiff)
-        pos_dict = get_position_dict(self.prompt_tokens, model=self.model, sep=sep)
-        results_dict = dict()
-        for pos_label, positions in pos_dict.items():
-            nodes = [
-                Node(node_name="resid_pre", layer=layer, seq_pos=positions)
-                for layer in range(self.model.cfg.n_layers)
-            ]
-            pos_results = act_patch(
-                self.model, self.prompt_tokens, nodes, metric, new_input=self.cf_tokens, verbose=verbose  # type: ignore
-            )
-            results_dict[pos_label] = pos_results.cpu().numpy()
-        return pd.DataFrame(results_dict)
-
-    def patch_at_position(
-        self, positions: List[int] | List[List[int]], verbose: bool = True
-    ) -> Float[Tensor, "batch"]:
-        results = []
-        for batch, (prompt, answer, cf_prompt, cf_answer) in enumerate(self):
-            prompt_tokens = self.model.to_tokens(prompt, prepend_bos=True)
-            cf_tokens = self.model.to_tokens(cf_prompt, prepend_bos=True)
-            answer_id = self.model.to_single_token(answer)
-            cf_answer_id = self.model.to_single_token(cf_answer)
-            answer_tokens = torch.tensor(
-                [answer_id, cf_answer_id], dtype=torch.int64, device=self.device
-            ).unsqueeze(0)
-            assert prompt_tokens.shape == cf_tokens.shape, (
-                f"Prompt and counterfactual prompt must have the same shape, "
-                f"for prompt {prompt} "
-                f"got {prompt_tokens.shape} and {cf_tokens.shape}"
-            )
-            self.model.reset_hooks()
-            base_logits = self.model(
-                prompt_tokens, prepend_bos=False, return_type="logits"
-            )
-            base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
-            cf_logits, cf_cache = self.model.run_with_cache(
-                cf_tokens, prepend_bos=False, return_type="logits"
-            )
-            assert isinstance(cf_logits, Tensor)
-            cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens)
-            metric = lambda logits: (
-                get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
-            ) / (cf_ldiff - base_ldiff)
-            nodes = [
-                Node(node_name="resid_pre", layer=layer, seq_pos=positions[batch])
-                for layer in range(self.model.cfg.n_layers)
-            ]
-            result = act_patch(
-                self.model,
-                prompt_tokens,
-                nodes,
-                metric,
-                new_cache=cf_cache,
-                verbose=verbose,
-            )
-            results.append(result)
-        results = torch.stack(results, dim=0)
-        return results

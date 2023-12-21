@@ -29,7 +29,7 @@ from tqdm.notebook import tqdm
 import pandas as pd
 from circuitsvis.activations import text_neuron_activations
 from summarization_utils.cache import resid_names_filter
-from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.ablation import (
     ablation_hook_base,
     freeze_attn_pattern_hook,
