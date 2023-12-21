@@ -51,7 +51,7 @@ from IPython.display import HTML, display
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from summarization_utils.circuit_analysis import get_logit_diff
+from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.tokenwise_ablation import (
     compute_ablation_modified_loss,
     load_directions,
@@ -112,24 +112,22 @@ assert model.tokenizer is not None
 # ### Knowledge Dataset
 
 # %%
-dataset = ToyDeductionTemplate(model, dataset_size=10, max=10)
+dataset_template = ToyDeductionTemplate(model, dataset_size=10, max=10)
+dataset = dataset_template.to_counterfactual()
 
 # %%
-dataset.prompts
+dataset.prompt_tokens
 
 # %%
-dataset.cf_prompts
+dataset.cf_tokens
 
 # %%
-dataset.cf_answers
+dataset.answer_tokens
 
 # %%
 all_logit_diffs, cf_logit_diffs = dataset.compute_logit_diffs()
 print(f"Original mean: {all_logit_diffs.mean():.2f}")
 print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
-
-# %%
-ans_tokens = dataset.answer_tokens.unsqueeze(1).to(device)
 
 # %%
 model.to_str_tokens(dataset.answer_tokens[0])
@@ -139,7 +137,7 @@ assert (all_logit_diffs > 0).all()
 assert (cf_logit_diffs < 0).all()
 
 # %%
-ans_tokens.shape, dataset.prompt_tokens.shape, dataset.cf_tokens.shape
+dataset.answer_tokens.shape, dataset.prompt_tokens.shape, dataset.cf_tokens.shape
 
 # %%
 results_pd = dataset.patch_by_position_group(sep=",")
@@ -165,8 +163,11 @@ orig_logit_diff = all_logit_diffs.mean()
 orig_logit_diff
 
 # %%
+all_logit_diffs
+
+# %%
 orig_logits, orig_cache = model.run_with_cache(dataset.prompt_tokens)
-orig_logit_diff = get_logit_diff(orig_logits, ans_tokens, per_prompt=False)
+orig_logit_diff = get_logit_diff(orig_logits, dataset.answer_tokens, per_prompt=True)
 orig_logit_diff
 
 # %%
@@ -175,7 +176,7 @@ flip_logit_diff
 
 # %%
 flip_logits, flip_cache = model.run_with_cache(dataset.cf_tokens)
-flip_logit_diff = get_logit_diff(flip_logits, ans_tokens, per_prompt=False)
+flip_logit_diff = get_logit_diff(flip_logits, dataset.answer_tokens, per_prompt=False)
 flip_logit_diff
 
 
