@@ -1221,6 +1221,16 @@ class CounterfactualDataset:
         )
 
     @classmethod
+    def empty(cls, model: HookedTransformer):
+        return cls(
+            prompts=[],
+            answers=[],
+            cf_prompts=[],
+            cf_answers=[],
+            model=model,
+        )
+
+    @classmethod
     def from_name(cls, name: str, model: HookedTransformer):
         if name == "KnownFor":
             return cls.from_tuples(KNOWN_FOR_TUPLES, model)
@@ -1228,6 +1238,16 @@ class CounterfactualDataset:
             return cls.from_tuples(OF_COURSE_TUPLES, model)
         elif name == "Code":
             return cls.from_tuples(CODE_TUPLES, model)
+        elif name == "BooleanNegator":
+            return BooleanNegatorDataset(model).to_counterfactual()
+        elif name == "BooleanOperator":
+            return BooleanOperatorDataset(model).to_counterfactual()
+        elif name == "ToyBinding":
+            return ToyBindingTemplate(model).to_counterfactual()
+        elif name == "ToyDeduction":
+            return ToyDeductionTemplate(model).to_counterfactual()
+        elif name == "ToyProfiles":
+            return ToyProfilesTemplate(model).to_counterfactual()
         else:
             raise ValueError(f"Unknown dataset name {name}")
 
