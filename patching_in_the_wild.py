@@ -119,94 +119,45 @@ search_tokens = [
     t if "x" not in s else -1 for t, s in zip(tokens.tolist()[0], str_tokens)
 ]
 print(search_tokens)
+# %%
+
+
+def find_subtensor(
+    main_tensor: torch.Tensor,
+    sub_tensor: torch.Tensor,
+    wildcard_value: int = -1,
+    device: torch.device = torch.device("cuda"),
+) -> torch.Tensor:
+    # Move tensors to GPU
+    main_tensor = main_tensor.to(device)
+    sub_tensor = sub_tensor.to(device)
+
+    if main_tensor.ndim == 1:
+        main_tensor = main_tensor.unsqueeze(0)
+
+    is_wildcard = sub_tensor == wildcard_value
+
+    # Use unfold to generate all sub-tensors
+    sub_tensors = main_tensor.unfold(1, sub_tensor.size(0), 1)
+    is_match = sub_tensors == sub_tensor
+    indices = torch.all(is_match | is_wildcard, dim=2)
+    result = torch.masked_select(sub_tensors, indices.unsqueeze(2)).view(
+        -1, sub_tensor.size(0)
+    )
+    return result
 
 
 # %%
-def find_subtensor(
-    main_tensor: Int[Tensor, "*batch pos"],
-    sub_tensor: Int[Tensor, "sub_pos"],
-    wildcard_value: int = -1,
-    verbose: bool = False,
-) -> Generator[Tensor, None, None]:
-    """
-    main_tensor: main tensor to search e.g. torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9])
-    sub_tensor: sub-tensor to search for in main_tensor, e.g. torch.tensor([3, 0, 5])
-    wildcard_tensor: treat this value as a wildcard, e.g. 0
-    out: list of found sub-tensors, e.g. [torch.tensor([3, 4, 5])]
-    """
-    if main_tensor.ndim == 1:
-        main_tensor = main_tensor.unsqueeze(0)
-    is_wildcard = sub_tensor == wildcard_value
-    for batch_idx, batch in enumerate(main_tensor):
-        for i in range(len(batch) - len(sub_tensor) + 1):
-            is_match = batch[i : i + len(sub_tensor)] == sub_tensor
-            if torch.all(is_match | is_wildcard):
-                if verbose:
-                    print(
-                        f"Found match at batch {batch_idx}, pos {i}: {batch[i:i+len(sub_tensor)]}"
-                    )
-                yield batch[i : i + len(sub_tensor)]
-
-
-# def find_subtensor(
-#     main_tensor: torch.Tensor,
-#     sub_tensor: torch.Tensor,
-#     wildcard_value: int = -1,
-#     verbose: bool = False,
-# ) -> torch.Tensor:
-
-#     # Move tensors to GPU
-#     main_tensor = main_tensor.to('cuda')
-#     sub_tensor = sub_tensor.to('cuda')
-
-#     if main_tensor.ndim == 1:
-#         main_tensor = main_tensor.unsqueeze(0)
-
-#     is_wildcard = sub_tensor == wildcard_value
-#     is_wildcard = is_wildcard.unsqueeze(1)
-
-#     # Use unfold to generate all sub-tensors
-#     sub_tensors = main_tensor.unfold(1, sub_tensor.size(0), 1)
-#     is_match = sub_tensors == sub_tensor
-#     indices = torch.all(is_match | is_wildcard, dim=2)
-#     result = torch.masked_select(sub_tensors, indices.unsqueeze(2)).view(-1, sub_tensor.size(0))
-
-#     if verbose:
-#         print(f"Found match : {result}")
-#     return result
-
-
-# # %%
-# out = find_subtensor(
-#     torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 3, 2, 5, 6, 7, 8, 9, 0]]),
-#     torch.tensor([3, -1, 5]),
-#     -1,
-# )
-# list(out)
-# # %%
-# out = find_subtensor(
-#     torch.tensor([[1, 2, 3, 4, 5, 6, 3, 8, 5], [1, 3, 2, 5, 6, 7, 8, 9, 0]]),
-#     torch.tensor([3, -1, 5]),
-#     -1,
-# )
-# list(out)
-# # %%
-# search_function = partial(
-#     find_subtensor,
-#     sub_tensor=torch.tensor(search_tokens, device=device),
-#     wildcard_value=-1,
-#     verbose=True,
-# )
-# # %%
-# out = search_function(model.to_tokens("for x in x: \n    print("))
-# list(out)
+search_function = partial(
+    find_subtensor,
+    sub_tensor=torch.tensor(search_tokens, device=device),
+    wildcard_value=-1,
+)
 # %%
 MAX_RESULTS = 100
 results = []
 for batch in tqdm(data_loader, total=len(data_loader)):
-    for result in find_subtensor(
-        batch["tokens"], torch.tensor(search_tokens), -1, verbose=True
-    ):
+    for result in search_function(batch["tokens"]):
         results.append(result)
     if len(results) >= MAX_RESULTS:
         break
