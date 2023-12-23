@@ -118,6 +118,9 @@ assert model.tokenizer is not None
 # %% [markdown]
 # ## Dataset Setup
 
+# %% [markdown]
+# ### Old Testing Code
+
 # %%
 code_snippets = [
     "def print_first_n_factorial_inorder(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x * num",
@@ -139,6 +142,9 @@ OP_NAMES = [
 for name in OP_NAMES:
     print(name)
     print(model.to_str_tokens(name, prepend_bos=False))
+
+# %% [markdown]
+# ### Create Dataset
 
 # %%
 dataset_template = ToyCodeLoopTemplate(model, dataset_size=25, max=25)
@@ -254,78 +260,19 @@ imshow_p(
     margin={"r": 100, "l": 100}
 )
 
-
 # %% [markdown]
 # ### Patching Tokens
-
-# %%
-def patch_token_values_with_freezing_hooks(
-        model: HookedTransformer,
-        dataset: CounterfactualDataset,
-        ablation_pos: Float[Tensor, "n_ablation_pos"],
-        freeze_pos: Float[Tensor, "n_freeze_pos"],
-        prompt_cache: Dict[str, Tensor],
-        cf_cache: Dict[str, Tensor],
-        heads_to_ablate: List[Tuple[int, int]] = None,
-        heads_to_freeze: List[Tuple[int, int]] = None,
-        layers_to_freeze: List[int] = None,
-        freeze_attn_patterns: bool = False,
-        freeze_attn_values: bool = False,
-        freeze_mlp_out: bool = False,
-        freeze_resid_post: bool = False,
-    ):
-
-    if heads_to_ablate is None:
-        heads_to_ablate = [(layer, head) for layer in range(model.cfg.n_layers) for head in range(model.cfg.n_heads)]
-    if heads_to_freeze is None:
-        heads_to_freeze = [(layer, head) for layer in range(model.cfg.n_layers) for head in range(model.cfg.n_heads)]
-    if layers_to_freeze is None:
-        layers_to_freeze = [layer for layer in range(model.cfg.n_layers)]
-
-    # freeze attention patterns (regardless of position)
-    if freeze_attn_patterns:
-        for layer, head in heads_to_freeze:
-            freeze_attn = partial(freeze_attn_pattern_hook, cache=prompt_cache, layer=layer, head_idx=head)
-            model.blocks[layer].attn.hook_pattern.add_hook(freeze_attn)
-
-    # freeze attn values (at specific positions)
-    if freeze_attn_values:
-        for layer, head in heads_to_freeze:
-            freeze_attn = partial(freeze_attn_head_pos_hook, cache=prompt_cache, component_type="hook_v", pos=freeze_pos, layer=layer, head_idx=head)
-            model.blocks[layer].attn.hook_v.add_hook(freeze_attn)
-
-    # freeze mlp_out positions (at specific positions)
-    if freeze_mlp_out:
-        for layer in layers_to_freeze:
-            freeze_comma_mlps = partial(freeze_layer_pos_hook, cache=prompt_cache, component_type="hook_mlp_out", pos=freeze_pos, layer=layer)
-            model.blocks[layer].hook_mlp_out.add_hook(freeze_comma_mlps)
-
-    # freeze resid_post positions (at specific positions)
-    if freeze_resid_post:
-        for layer in layers_to_freeze:
-            freeze_comma_resid = partial(freeze_layer_pos_hook, cache=prompt_cache, component_type="hook_resid_post", pos=freeze_pos, layer=layer)
-            model.blocks[layer].hook_resid_post.add_hook(freeze_comma_resid)
-
-    # ablate values
-    for layer, head in heads_to_ablate:
-        ablate_precommas = partial(ablate_attn_head_pos_hook, cache=cf_cache, ablation_func=None, component_type="hook_v", pos=ablation_pos, layer=layer, head_idx=head)
-        model.blocks[layer].attn.hook_v.add_hook(ablate_precommas)
-
-    ablated_logits, ablated_cache = model.run_with_cache(dataset.prompt_tokens)
-    model.reset_hooks()
-
-    return get_logit_diff(ablated_logits, dataset.answer_tokens).item(), get_logit_diff(ablated_logits, dataset.answer_tokens, per_prompt=True), get_logit_diff(prompt_logits, dataset.answer_tokens, per_prompt=True)
-
 
 # %% [markdown]
 # #### Phrase and Sum Token
 
 # %%
-ablation_pos = torch.tensor([8, 9, 49])
+ablation_pos = torch.tensor([8, 9, 39])
 
 # %%
 ablated_logit_diff, ablated_ld_list, clean_ld_list = patch_token_values_with_freezing_hooks(
     model=model,
+    dataset=dataset,
     ablation_pos=ablation_pos,
     freeze_pos=torch.tensor([]),
     prompt_cache=prompt_cache,
@@ -344,12 +291,13 @@ model.reset_hooks()
 # #### Phrase Only
 
 # %%
-freeze_pos = torch.tensor([49])
+freeze_pos = torch.tensor([39])
 ablation_pos = torch.tensor([8, 9])
 
 # %%
 ablated_logit_diff, ablated_ld_list, clean_ld_list = patch_token_values_with_freezing_hooks(
     model=model,
+    dataset=dataset,
     ablation_pos=ablation_pos,
     freeze_pos=freeze_pos,
     prompt_cache=prompt_cache,
@@ -371,11 +319,12 @@ model.reset_hooks()
 
 # %%
 freeze_pos = torch.tensor([8, 9])
-ablation_pos = torch.tensor([49])
+ablation_pos = torch.tensor([39])
 
 # %%
 ablated_logit_diff, ablated_ld_list, clean_ld_list = patch_token_values_with_freezing_hooks(
     model=model,
+    dataset=dataset,
     ablation_pos=ablation_pos,
     freeze_pos=freeze_pos,
     prompt_cache=prompt_cache,
