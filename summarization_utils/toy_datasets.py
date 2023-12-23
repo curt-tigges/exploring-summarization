@@ -762,35 +762,32 @@ class ToyDeductionTemplate(TemplaticDataset):
         "Bob",
         "Carol",
         "David",
-        "Emma",
         "Mike",
         "Sarah",
         "John",
-        "Linda",
         "Peter",
-        "Grace",
-        "Oliver",
-        "Sophie",
         "Josh",
-        "Mia",
         "Tom",
-        "Rachel",
         "Henry",
-        "Alice",
         "George",
     ]
     GROUPS = [
+        "human",
         "dog",
-        "cat",
         "bird",
-        "hamster",
-        "rabbit",
-        "Capricorn",
-        "Scorpio",
-        "Leo",
-        "Cancer",
-        "Gemini",
+        "bear",
+        "lion",
+        "tiger",
+        "plant",
+        "flower",
+        "doctor",
+        "teacher",
+        "scientist",
+        "engineer",
+        "writer",
+        "artist",
     ]
+
     ATTRIBUTES = [
         "red",
         "blue",
@@ -980,7 +977,94 @@ class ToyProfilesTemplate(TemplaticDataset):
             for name, city, job, query in prompt_tuples
         ]
 
+class ToyCodeLoopTemplate(TemplaticDataset):
+    OP_NAMES = [
+        "factorial_inorder",
+        "triangular_numbers",
+        "exponentiated_numbers",
+        "subtracted_numbers",
+        "divided_numbers",
+    ]
 
+    VARS = [
+        "a",
+        "b",
+        "c",
+        "x",
+        "y",
+        "z",
+        "num",
+        "val",
+    ]
+    
+    INITIAL_VALS = [
+        "0",
+        "1",
+        # "2",
+        # "3",
+        # "4",
+        # "5",
+        # "6",
+        # "7",
+        # "8",
+        # "9",
+    ]
+
+    ANSWER_DICT = {
+        "factorial_inorder": "*",
+        "triangular_numbers": "+",
+        "exponentiated_numbers": "**",
+        "subtracted_numbers": "-",
+        "divided_numbers": "/",
+    }
+
+    COMMENTS = [
+        ""
+        #"# this is a comment explaining the code\n",
+    ]
+
+    def __init__(
+        self,
+        model: HookedTransformer,
+        dataset_size: int = 100,
+        max: int = 1000,
+        seed: int = 0,
+    ) -> None:
+        template = "def print_first_n_{OP_NAME}(n: int) -> None:\n    {VAR} = {INITIAL_VAL}\n    for num in range(1, n + 1):\n{COMMENT}        {VAR} = {VAR}"
+        prompt_tuples = list(
+            itertools.product(self.OP_NAMES, self.VARS, self.COMMENTS, self.INITIAL_VALS)
+        )
+        random.seed(seed)
+        random.shuffle(prompt_tuples)
+        prompt_tuples = prompt_tuples[:max]
+        super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
+        self.seed = seed
+
+    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+        random.seed(self.seed)
+        cf_tuples = []
+        for name, var, comment, initial in self.prompt_tuples:
+            name_idx = self.OP_NAMES.index(name)
+            new_name= self.OP_NAMES[(name_idx + 1) % len(self.OP_NAMES)]
+            cf_tuples.append((new_name, var, comment, initial))
+        return cf_tuples
+
+    @classmethod
+    def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]):
+        return [" " + cls.ANSWER_DICT[name] for name, _, _, _ in prompt_tuples]
+
+    def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]):
+        return [
+            self.template.format(
+                OP_NAME=name,
+                VAR=var,
+                COMMENT=comment,
+                INITIAL_VAL=initial,
+            )
+            for name, var, comment, initial in prompt_tuples
+        ]
+    
+    
 class CounterfactualDataset:
     def __init__(
         self,
