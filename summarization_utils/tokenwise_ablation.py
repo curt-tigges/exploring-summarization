@@ -38,6 +38,12 @@ from summarization_utils.ablation import (
 from summarization_utils.datasets import ExperimentDataLoader
 from summarization_utils.store import create_file_name, ResultsFile
 
+from summarization_utils.ablation import ablate_attn_head_pos_hook, freeze_attn_head_pos_hook, freeze_attn_pattern_hook, freeze_layer_pos_hook
+
+from summarization_utils.toy_datasets import (
+    CounterfactualDataset
+)
+
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -664,3 +670,63 @@ def compute_zeroed_attn_modified_loss(
 
     model.reset_hooks()
     return torch.cat(loss_list)
+
+
+def patch_token_values_with_freezing_hooks(
+        model: HookedTransformer,
+        dataset: CounterfactualDataset,
+        ablation_pos: Float[Tensor, "n_ablation_pos"],
+        freeze_pos: Float[Tensor, "n_freeze_pos"],
+        prompt_cache: Dict[str, Tensor],
+        cf_cache: Dict[str, Tensor],
+        heads_to_ablate: List[Tuple[int, int]] = None,
+        heads_to_freeze: List[Tuple[int, int]] = None,
+        layers_to_freeze: List[int] = None,
+        freeze_attn_patterns: bool = False,
+        freeze_attn_values: bool = False,
+        freeze_mlp_out: bool = False,
+        freeze_resid_post: bool = False,
+    ):
+
+    prompt_logits, prompt_cache = model.run_with_cache(dataset.prompt_tokens)
+
+    if heads_to_ablate is None:
+        heads_to_ablate = [(layer, head) for layer in range(model.cfg.n_layers) for head in range(model.cfg.n_heads)]
+    if heads_to_freeze is None:
+        heads_to_freeze = [(layer, head) for layer in range(model.cfg.n_layers) for head in range(model.cfg.n_heads)]
+    if layers_to_freeze is None:
+        layers_to_freeze = [layer for layer in range(model.cfg.n_layers)]
+
+    # freeze attention patterns (regardless of position)
+    if freeze_attn_patterns:
+        for layer, head in heads_to_freeze:
+            freeze_attn = partial(freeze_attn_pattern_hook, cache=prompt_cache, layer=layer, head_idx=head)
+            model.blocks[layer].attn.hook_pattern.add_hook(freeze_attn)
+
+    # freeze attn values (at specific positions)
+    if freeze_attn_values:
+        for layer, head in heads_to_freeze:
+            freeze_attn = partial(freeze_attn_head_pos_hook, cache=prompt_cache, component_type="hook_v", pos=freeze_pos, layer=layer, head_idx=head)
+            model.blocks[layer].attn.hook_v.add_hook(freeze_attn)
+
+    # freeze mlp_out positions (at specific positions)
+    if freeze_mlp_out:
+        for layer in layers_to_freeze:
+            freeze_comma_mlps = partial(freeze_layer_pos_hook, cache=prompt_cache, component_type="hook_mlp_out", pos=freeze_pos, layer=layer)
+            model.blocks[layer].hook_mlp_out.add_hook(freeze_comma_mlps)
+
+    # freeze resid_post positions (at specific positions)
+    if freeze_resid_post:
+        for layer in layers_to_freeze:
+            freeze_comma_resid = partial(freeze_layer_pos_hook, cache=prompt_cache, component_type="hook_resid_post", pos=freeze_pos, layer=layer)
+            model.blocks[layer].hook_resid_post.add_hook(freeze_comma_resid)
+
+    # ablate values
+    for layer, head in heads_to_ablate:
+        ablate_precommas = partial(ablate_attn_head_pos_hook, cache=cf_cache, ablation_func=None, component_type="hook_v", pos=ablation_pos, layer=layer, head_idx=head)
+        model.blocks[layer].attn.hook_v.add_hook(ablate_precommas)
+
+    ablated_logits, ablated_cache = model.run_with_cache(dataset.prompt_tokens)
+    model.reset_hooks()
+
+    return get_logit_diff(ablated_logits, dataset.answer_tokens).item(), get_logit_diff(ablated_logits, dataset.answer_tokens, per_prompt=True), get_logit_diff(prompt_logits, dataset.answer_tokens, per_prompt=True)
