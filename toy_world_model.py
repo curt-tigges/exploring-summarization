@@ -59,6 +59,7 @@ from summarization_utils.datasets import (
 from summarization_utils.neuroscope import plot_top_onesided
 from summarization_utils.store import ResultsFile, TensorBlockManager
 from summarization_utils.path_patching import act_patch, Node, IterNode, IterSeqPos
+from typing import Sequence
 from summarization_utils.toy_datasets import (
     CounterfactualDataset,
     ToyDeductionTemplate,
@@ -139,53 +140,79 @@ model = HookedMistral.from_pretrained(
 )
 assert model.tokenizer is not None
 # %%
-# test_prompt(
-#     "[INST] Anne carried her cane, hat and glasses. Anne lost her cane on the walk. Anne found her cane again in some bushes. Question: Does Anne have her cane? Answer (Yes/No): [/INST]",
-#     " Yes",
-#     model,
-#     prepend_space_to_answer=False,
-# )
-# %%
-PROMPT_ANSWER_PAIRS = [
+DATA_TUPLES: List[Tuple[str, str, str, str]] = [
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " No",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    # ),
     (
         "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
         " No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
-        " Yes",
-    ),
-    (
         "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
         " Yes",
     ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
-        " Yes",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
-        " Yes",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? Answer (Yes/No): [/INST]",
-        " No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? Answer (Yes/No): [/INST]",
-        " No",
-    ),
-]
-# %%
-# for prompt, answer in PROMPT_ANSWER_PAIRS:
-#     test_prompt(prompt, answer, model, prepend_space_to_answer=False)
-# %%
-DATA_TUPLES = [
-    (prompt, answer, cf_prompt, cf_answer)
-    for (prompt, answer), (cf_prompt, cf_answer) in itertools.combinations(
-        PROMPT_ANSWER_PAIRS, 2
-    )
-    if answer != cf_answer
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " No",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " No",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? Answer (Yes/No): [/INST]",
+    #     " No",
+    # ),
 ]
 # %%
 dataset = CounterfactualDataset.from_tuples(DATA_TUPLES, model)
@@ -208,3 +235,77 @@ pos_layer_results = patch_by_layer(dataset)
 # %%
 plot_layer_results_per_batch(dataset, pos_layer_results)
 # %%
+# #############################################################################
+# Patching across positions
+# #############################################################################
+# %%
+prompt = dataset.prompts[0]
+answer = dataset.answers[0]
+cf_prompt = dataset.cf_prompts[0]
+cf_answer = dataset.cf_answers[0]
+prepend_bos: bool = True
+# %%
+[f"{i}: {t}" for i, t in enumerate(model.to_str_tokens(prompt))]
+# %%
+prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
+cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
+answer_id = model.to_single_token(answer)
+cf_answer_id = model.to_single_token(cf_answer)
+answer_tokens = torch.tensor(
+    [answer_id, cf_answer_id], dtype=torch.int64, device=model.cfg.device
+).unsqueeze(0)
+assert prompt_tokens.shape == cf_tokens.shape, (
+    f"Prompt and counterfactual prompt must have the same shape, "
+    f"for prompt {prompt} "
+    f"got {prompt_tokens.shape} and {cf_tokens.shape}"
+)
+model.reset_hooks(including_permanent=True)
+base_logits_by_pos, base_cache = model.run_with_cache(
+    prompt_tokens,
+    prepend_bos=False,
+    return_type="logits",
+)
+base_logits: Float[Tensor, "... d_vocab"] = base_logits_by_pos[:, -1, :]
+base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
+cf_logits, cf_cache = model.run_with_cache(
+    cf_tokens, prepend_bos=False, return_type="logits"
+)
+assert isinstance(cf_logits, Tensor)
+cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens)
+metric = lambda logits: (
+    get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
+) / (cf_ldiff - base_ldiff)
+# %%
+stick_positions = [7, 16, 27]
+# %%
+resids = []
+labels = []
+for cache_str in ("base", "cf"):
+    cache = base_cache if cache_str == "base" else cf_cache
+    for pos_idx, pos in enumerate(stick_positions):
+        for layer in range(model.cfg.n_layers):
+            resids.append(cache["resid_pre", layer][:, pos, :])
+            labels.append(f"{cache_str} L{layer} P{pos_idx+1}")
+resids = torch.cat(resids, dim=0)
+cosine_sims = (resids @ resids.T) / (
+    resids.norm(dim=-1, keepdim=True) @ resids.norm(dim=-1, keepdim=True).T
+)
+cosine_sims = cosine_sims.cpu().to(dtype=torch.float32).numpy()
+print(resids.shape, cosine_sims.shape)
+# %%
+# plot cosine similarity matrix between the residuals
+fig = px.imshow(
+    cosine_sims,
+    x=labels,
+    y=labels,
+    width=1200,
+    height=1200,
+    title="Cosine Similarity Matrix",
+)
+fig.update_layout(
+    title_x=0.5,
+)
+fig.show()
+# %%
+# What is up with the weird discontinuity at L20?
+# cf middle position is very different to other positions as expected
