@@ -65,6 +65,8 @@ from summarization_utils.counterfactual_patching import (
     patch_by_position_group,
     patch_by_layer,
     plot_layer_results_per_batch,
+    patch_by_position,
+    plot_position_results_per_batch,
 )
 
 # %%
@@ -217,16 +219,11 @@ print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 assert (all_logit_diffs > 0).all()
 assert (cf_logit_diffs < 0).all()
 # %%
-# results_pd = patch_by_position_group(dataset, sep=",")
-# fig = px.bar(
-#     results_pd.mean(axis=0),
-#     labels={"index": "Position", "value": "Patching metric"},
-#     title=f"Patching metric by position group, {model.cfg.model_name}, '{DATASET_NAME}' dataset",
-# )
-# fig.update_layout(showlegend=False)
-# fig.show()
+pos_results = patch_by_position(dataset)
 # %%
-pos_layer_results = patch_by_layer(dataset)
+plot_position_results_per_batch(dataset, pos_results)
 # %%
-plot_layer_results_per_batch(dataset, pos_layer_results)
+# pos_layer_results = patch_by_layer(dataset)
+# # %%
+# plot_layer_results_per_batch(dataset, pos_layer_results)
 # %%
