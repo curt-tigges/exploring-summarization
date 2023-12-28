@@ -220,33 +220,64 @@ def triple_metric_base(
     a1: str,
     a2: str,
     a3: str,
-    baseline: Optional[Float[Tensor, "3"]] = None,
-) -> Float[Tensor, "3"]:
-    if baseline is None:
-        baseline = torch.zeros(3, dtype=torch.float32)
-    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-    return (
-        torch.tensor(
-            [
-                log_probs[-1, -1, model.to_single_token(a1)].item(),
-                log_probs[-1, -1, model.to_single_token(a2)].item(),
-                log_probs[-1, -1, model.to_single_token(a3)].item(),
-            ]
-        )
-        - baseline
+    orig12: Optional[Float[Tensor, ""]] = None,
+    orig13: Optional[Float[Tensor, ""]] = None,
+    new12: Optional[Float[Tensor, ""]] = None,
+    new13: Optional[Float[Tensor, ""]] = None,
+) -> Float[Tensor, "2"]:
+    answers12 = torch.tensor(
+        [model.to_single_token(a1), model.to_single_token(a2)], device=device
+    ).unsqueeze(0)
+    answers13 = torch.tensor(
+        [model.to_single_token(a1), model.to_single_token(a3)], device=device
+    ).unsqueeze(0)
+    logit_diff12 = get_logit_diff(logits, answer_tokens=answers12)
+    logit_diff13 = get_logit_diff(logits, answer_tokens=answers13)
+    if orig12 is not None:
+        assert orig13 is not None
+        assert new12 is not None
+        assert new13 is not None
+        logit_diff12 = (logit_diff12 - orig12) / (new12 - orig12)
+        logit_diff13 = (logit_diff13 - orig13) / (new13 - orig13)
+    return torch.stack(
+        [logit_diff12, logit_diff13],
+        dim=0,
     )
 
 
 # %%
 results_list = []
-for p1, a1, p2, a2, p3, a3 in DATASET[:5]:
+for p1, a1, p2, a2, p3, a3 in DATASET[:2]:
     orig_input = model.to_tokens(p1, prepend_bos=True)
     orig_logits = model(orig_input, return_type="logits")
-    orig_triple = triple_metric_base(orig_logits, model, a1, a2, a3)
+    orig12, orig13 = triple_metric_base(orig_logits, model, a1, a2, a3)
     prompt_str_tokens = model.to_str_tokens(p1, prepend_bos=True)
+    new_logit_diffs = []
+    for cf_idx in (0, 1):
+        new_input = [p2, p3][cf_idx]
+        new_logits = model(new_input, return_type="logits", prepend_bos=True)
+        new_logit_diff = triple_metric_base(
+            new_logits,
+            model,
+            a1,
+            a2,
+            a3,
+        )[cf_idx]
+        new_logit_diffs.append(new_logit_diff)
+    new12, new13 = new_logit_diffs
     metric = partial(
-        triple_metric_base, model=model, a1=a1, a2=a2, a3=a3, baseline=orig_triple
+        triple_metric_base,
+        model=model,
+        a1=a1,
+        a2=a2,
+        a3=a3,
+        orig12=orig12,
+        orig13=orig13,
+        new12=new12,
+        new13=new13,
     )
+    print(orig12, orig13, new12, new13)
+    print(metric(orig_logits), metric(new_logits))
     seq_pos = [i for i, s in enumerate(prompt_str_tokens) if ":" in s]
     assert len(seq_pos) == 1
     nodes = IterNode(node_names=["resid_pre"], seq_pos=seq_pos)
@@ -259,7 +290,6 @@ for p1, a1, p2, a2, p3, a3 in DATASET[:5]:
         ]  # type: ignore
         result: Float[Tensor, "layer"] = torch.stack(result, dim=0)  # type: ignore
         results_list.append(result)
-print(results_list[0])
 # %%
 results: Float[Tensor, "batch cf layer answer"] = einops.rearrange(
     torch.stack(results_list, dim=0),
@@ -276,17 +306,19 @@ for batch in range(results.shape[0]):
     for cf in range(results.shape[1]):
         fig.add_trace(
             go.Heatmap(
-                z=results[batch, cf],
+                z=results[batch, cf].cpu().numpy(),
                 name=f"batch={batch}, cf={cf+1}",
                 colorscale="RdBu",
-                zmin=-20,
-                zmax=0,
-                hovertemplate="answer=%{x}<br>layer=%{y}<br>logit=%{z:.2f}",
+                zmin=0,
+                zmax=1,
+                hovertemplate="answer=%{x}<br>layer=%{y}<br>logit diff=%{z:.1%}",
             ),
             row=batch + 1,
             col=cf + 1,
         )
-        fig.update_xaxes(title_text="answer", row=batch + 1, col=cf + 1)
+        fig.update_xaxes(
+            title_text="answer", row=batch + 1, col=cf + 1, tickvals=[0, 1]
+        )
         fig.update_yaxes(title_text="layer", row=batch + 1, col=cf + 1)
 fig.update_layout(
     height=results.shape[0] * 400,
