@@ -108,7 +108,7 @@ def tokenize_truncate_concatenate(
         tokens: Int[np.ndarray, "batch seq"] = tokenizer(
             text,
             return_tensors="np",
-            padding=padding,
+            padding="max_length" if padding else None,
             truncation=truncation,
             max_length=seq_len,
         )[  # type: ignore
