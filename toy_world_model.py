@@ -141,18 +141,24 @@ model = HookedMistral.from_pretrained(
 assert model.tokenizer is not None
 # %%
 DATA_TUPLES: List[Tuple[str, str, str, str]] = [
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne found her stick again in some bushes. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+        " Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne lost her hat too in some bushes. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+        " No",
+    ),
     # (
     #     "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
     #     " No",
     #     "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
     #     " Yes",
     # ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
-        " No",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
-        " Yes",
-    ),
+    # (
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " No",
+    #     "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
+    #     " Yes",
+    # ),
     # (
     #     "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? Answer (Yes/No): [/INST]",
     #     " No",
@@ -219,7 +225,7 @@ dataset = CounterfactualDataset.from_tuples(DATA_TUPLES, model)
 # %%
 dataset.check_lengths_match()
 # %%
-dataset.test_prompts(max_prompts=4, top_k=10)
+dataset.test_prompts(max_prompts=10, top_k=10)
 # %%
 all_logit_diffs, cf_logit_diffs = dataset.compute_logit_diffs()
 # %%
@@ -245,7 +251,8 @@ cf_prompt = dataset.cf_prompts[0]
 cf_answer = dataset.cf_answers[0]
 prepend_bos: bool = True
 # %%
-[f"{i}: {t}" for i, t in enumerate(model.to_str_tokens(prompt))]
+summary_positions = [i for i, t in enumerate(model.to_str_tokens(prompt)) if t == "."]
+print(summary_positions)
 # %%
 prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
 cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
@@ -276,13 +283,15 @@ metric = lambda logits: (
     get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
 ) / (cf_ldiff - base_ldiff)
 # %%
-stick_positions = [7, 16, 27]
+# #############################################################################
+# COSINE SIMS
+# #############################################################################
 # %%
 resids = []
 labels = []
 for cache_str in ("base", "cf"):
     cache = base_cache if cache_str == "base" else cf_cache
-    for src_idx, src_pos in enumerate(stick_positions):
+    for src_idx, src_pos in enumerate(summary_positions):
         for layer in range(model.cfg.n_layers):
             resids.append(cache["resid_pre", layer][:, src_pos, :])
             labels.append(f"{cache_str} L{layer} P{src_idx+1}")
@@ -306,6 +315,10 @@ fig.update_layout(
     title_x=0.5,
 )
 fig.show()
+# %%
+# #############################################################################
+# PATCHING
+# #############################################################################
 # %%
 print(DATA_TUPLES[0])
 
@@ -331,8 +344,8 @@ metrics = []
 labels = []
 for cache_str in ("base", "cf"):
     cache = base_cache if cache_str == "base" else cf_cache
-    for src_idx, src_pos in enumerate(stick_positions):
-        for dest_idx, dest_pos in enumerate(stick_positions):
+    for src_idx, src_pos in enumerate(summary_positions):
+        for dest_idx, dest_pos in enumerate(summary_positions):
             model.reset_hooks()
             hook_fn = partial(
                 patch_hook_base,
