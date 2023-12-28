@@ -14,7 +14,7 @@ from datasets import load_dataset, concatenate_datasets
 from jaxtyping import Float, Int, Bool
 from typing import Dict, Iterable, List, Tuple, Union, Literal, Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformer_lens import HookedTransformer
+from transformer_lens import ActivationCache, HookedTransformer
 from transformer_lens.utils import (
     get_dataset,
     tokenize_and_concatenate,
@@ -282,10 +282,10 @@ resids = []
 labels = []
 for cache_str in ("base", "cf"):
     cache = base_cache if cache_str == "base" else cf_cache
-    for pos_idx, pos in enumerate(stick_positions):
+    for src_idx, src_pos in enumerate(stick_positions):
         for layer in range(model.cfg.n_layers):
-            resids.append(cache["resid_pre", layer][:, pos, :])
-            labels.append(f"{cache_str} L{layer} P{pos_idx+1}")
+            resids.append(cache["resid_pre", layer][:, src_pos, :])
+            labels.append(f"{cache_str} L{layer} P{src_idx+1}")
 resids = torch.cat(resids, dim=0)
 cosine_sims = (resids @ resids.T) / (
     resids.norm(dim=-1, keepdim=True) @ resids.norm(dim=-1, keepdim=True).T
@@ -307,5 +307,66 @@ fig.update_layout(
 )
 fig.show()
 # %%
+print(DATA_TUPLES[0])
+
+
+# %%
+def patch_hook_base(
+    input: Float[Tensor, "batch pos d_model"],
+    hook: HookPoint,
+    cache: ActivationCache,
+    src_position: int,
+    dest_position: int,
+):
+    """Patch the activations at a given position by setting them to zero."""
+    assert hook.name is not None and "resid_pre" in hook.name
+    input[:, dest_position, :] = cache["resid_pre", hook.layer()][:, src_position, :]
+    return input
+
+
+# %%
 # What is up with the weird discontinuity at L20?
 # cf middle position is very different to other positions as expected
+metrics = []
+labels = []
+for cache_str in ("base", "cf"):
+    cache = base_cache if cache_str == "base" else cf_cache
+    for src_idx, src_pos in enumerate(stick_positions):
+        for dest_idx, dest_pos in enumerate(stick_positions):
+            model.reset_hooks()
+            hook_fn = partial(
+                patch_hook_base,
+                src_position=src_pos,
+                dest_position=dest_pos,
+                cache=cache,
+            )
+            patched_logits = model.run_with_hooks(
+                prompt_tokens,
+                fwd_hooks=[
+                    (f"blocks.{layer}.hook_resid_pre", hook_fn)
+                    for layer in range(model.cfg.n_layers)
+                ],
+                prepend_bos=False,
+            )
+            patched_metric = metric(patched_logits)
+            metrics.append(patched_metric.cpu().item())
+            labels.append(f"{cache_str} {src_idx+1} -> base {dest_idx+1}")
+# %%
+df = pd.DataFrame({"metric": metrics, "label": labels})
+df["cache"] = df["label"].apply(lambda x: x.split()[0])
+df["src"] = df["label"].apply(lambda x: " ".join(x.split()[:2]))
+df["dest"] = df["label"].apply(lambda x: " ".join(x.split()[-2:]))
+pt = df.pivot(index="src", columns="dest", values="metric")
+pt
+
+# %%
+fig = px.imshow(
+    pt,
+    title="Patch by position",
+    text_auto=".1%",
+)
+fig.update_layout(
+    title_x=0.5,
+)
+fig.show()
+# %%
