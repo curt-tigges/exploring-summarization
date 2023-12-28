@@ -1016,6 +1016,25 @@ class CounterfactualDataset:
     def __len__(self):
         return len(self.prompts)
 
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            # If the index is a slice, return a new CounterfactualDataset with the sliced data
+            return CounterfactualDataset(
+                prompts=self.prompts[idx],
+                answers=self.answers[idx],
+                cf_prompts=self.cf_prompts[idx],
+                cf_answers=self.cf_answers[idx],
+                model=self.model,
+            )
+        else:
+            # If the index is an integer, return a tuple with the data at that index
+            return (
+                self.prompts[idx],
+                self.answers[idx],
+                self.cf_prompts[idx],
+                self.cf_answers[idx],
+            )
+
     def shuffle(self, seed: int = 0) -> "CounterfactualDataset":
         random.seed(seed)
         index = list(range(len(self)))
