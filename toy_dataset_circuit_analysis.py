@@ -96,19 +96,12 @@ assert model.tokenizer is not None
 
 
 # %%
-def increment_list(l: List[int]) -> List[int]:
-    for i in range(len(l)):
-        l[i]
+def listRightIndex(alist, value):
+    return len(alist) - alist[-1::-1].index(value) - 1
 
 
 # %%
 CODE_TUPLES = [
-    # (
-    #     "def print_first_n_factorial_inorder(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
-    #     " *",
-    #     "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
-    #     " +",
-    # ),  # 29% at "x"
     (
         "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
         " print",
@@ -120,47 +113,57 @@ CODE_TUPLES = [
         "1",
         "def fibonacci(n: int) -> int:\n    if n <= 0:\n        return ",
         "0",
-    ),  # (25% at "return", ) 16% at ":"
-    # (
-    #     "def is_even(n: int) -> bool:\n    if n % 2 == ",
-    #     "0",
-    #     "def is_odd(n: int) -> bool:\n    if n % 2 == ",
-    #     "1",
-    # ),  # 15% at "=="
-    # (
-    #     "def increment_list(l: List[int]) -> List[int]:\n    for i in range(len(l)):\n        l[i] = l[i]",
-    #     " +",
-    #     "def decrement_list(l: List[int]) -> List[int]:\n    for i in range(len(l)):\n        l[i] = l[i]",
-    #     " -",
-    # ),
-    # (
-    #     "def increment_list(l: List[int]) -> List[int]:\n    for value in l:\n        value = value",
-    #     " +",
-    #     "def decrement_list(l: List[int]) -> List[int]:\n    for value in l:\n        value = value",
-    #     " -",
-    # ),
+    ),  # 16% at ":"
+    (
+        "def sum_naturals(n):\n    if n <= 1:\n        return n",
+        "\n   ",
+        "def sum_of_squares(n):\n    if n <= 1:\n        return n",
+        " **",
+    ),
+    (
+        "def power(a, b):\n    if b == 0:\n        return ",
+        "1",
+        "def divide(a, b):\n    if b == 0:\n        return ",
+        "0",
+    ),
+    (
+        "def zero_every_second_element(x: Tensor) -> Tensor:\n    return x * torch.tensor([1, ",
+        "0",
+        "def zero_every_fourth_element(x: Tensor) -> Tensor:\n    return x * torch.tensor([1, ",
+        "1",
+    ),
+    (
+        "def replace_every_nth_token_with_space(tokens: List[str], n: int) -> List[str]:\n    return ['",
+        " '",
+        "def replace_every_nth_token_with_comma(tokens: List[str], n: int) -> List[str]:\n    return ['",
+        ",",
+    ),
+    (
+        "def isVowel(c: str) -> bool:\n    return c in '",
+        "ae",
+        "def consonant(c: str) -> bool:\n    return c in '",
+        "bc",
+    ),
 ]
 patch_positions = torch.tensor(
     [
-        # 39,
-        56,
-        18,
-        # 19,
-        # 24
+        listRightIndex(model.to_str_tokens(prompt), ":")
+        for prompt, _, _, _ in CODE_TUPLES
     ],
     dtype=torch.long,
     device=device,
 ).unsqueeze(1)
+# print(patch_positions)
 # %%
-for i, (prompt, _, _, _) in enumerate(CODE_TUPLES):
-    print(model.to_str_tokens(prompt)[patch_positions[i]])
-    # print([f"{i}:{t}" for i, t in enumerate(model.to_str_tokens(prompt))])
+# for i, (prompt, _, _, _) in enumerate(CODE_TUPLES):
+#     print(model.to_str_tokens(prompt)[patch_positions[i]])
+# print([f"{i}:{t}" for i, t in enumerate(model.to_str_tokens(prompt))])
 # %%
 dataset = CounterfactualDataset.from_tuples(CODE_TUPLES, model)
 # %%
 dataset.check_lengths_match()
 # %%
-dataset.test_prompts(max_prompts=10, top_k=10)
+dataset.test_prompts(max_prompts=20, top_k=10)
 # %%
 all_logit_diffs, cf_logit_diffs = dataset.compute_logit_diffs()
 # %%
@@ -169,16 +172,22 @@ print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 # %%
 assert (all_logit_diffs > 0).all()
 assert (cf_logit_diffs < 0).all()
-# # %%
-# pos_layer_results = patch_by_layer(dataset)
-# print(len(pos_layer_results), pos_layer_results[0].shape)
-# # %%
-# plot_layer_results_per_batch(dataset, pos_layer_results)
+# %%
+# ###################################################################################
+# LAYER POSITION PATCHING
+# ###################################################################################
+# %%
+pos_layer_results = patch_by_layer(dataset)
+print(len(pos_layer_results), pos_layer_results[0].shape)
+# %%
+plot_layer_results_per_batch(dataset, pos_layer_results)
+# %%
+# ###################################################################################
+# HEAD POSITION PATCHING
+# ###################################################################################
 # %%
 head_layer_results = patch_by_layer(dataset, node_name="z", seq_pos=patch_positions)
 print(len(head_layer_results), head_layer_results[0].shape)
-
-
 # %%
 plot_head_results_per_batch(dataset, head_layer_results)
 # %%
