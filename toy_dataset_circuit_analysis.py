@@ -115,34 +115,10 @@ CODE_TUPLES = [
         "0",
     ),  # 16% at ":"
     (
-        "def sum_naturals(n):\n    if n <= 1:\n        return n",
-        "\n   ",
-        "def sum_of_squares(n):\n    if n <= 1:\n        return n",
-        " **",
-    ),
-    (
         "def power(a, b):\n    if b == 0:\n        return ",
         "1",
         "def divide(a, b):\n    if b == 0:\n        return ",
         "0",
-    ),
-    (
-        "def zero_every_second_element(x: Tensor) -> Tensor:\n    return x * torch.tensor([1, ",
-        "0",
-        "def zero_every_fourth_element(x: Tensor) -> Tensor:\n    return x * torch.tensor([1, ",
-        "1",
-    ),
-    (
-        "def replace_every_nth_token_with_space(tokens: List[str], n: int) -> List[str]:\n    return ['",
-        " '",
-        "def replace_every_nth_token_with_comma(tokens: List[str], n: int) -> List[str]:\n    return ['",
-        ",",
-    ),
-    (
-        "def isVowel(c: str) -> bool:\n    return c in '",
-        "ae",
-        "def consonant(c: str) -> bool:\n    return c in '",
-        "bc",
     ),
 ]
 patch_positions = torch.tensor(
@@ -191,3 +167,33 @@ print(len(head_layer_results), head_layer_results[0].shape)
 # %%
 plot_head_results_per_batch(dataset, head_layer_results)
 # %%
+heads: List[Tuple[int, int]] = [(10, 7), (10, 15), (11, 4)]
+# %%
+for prompt, _, cf_prompt, _ in CODE_TUPLES:
+    for p in (prompt, cf_prompt):
+        html = plot_attention(
+            model,
+            p,
+            heads,
+            weighted=True,
+            min_value=0.0,
+            max_value=0.5,
+        )
+        display(HTML(html.local_src))
+# %%
+"""
+Prompt 1:
+10.7 attends to "0" and the other previous 3 tokens
+10.15 attends to function name (and to "0")
+11.4 attends to "0"
+
+Prompt 2:
+10.7 attends to "1"
+10.15 attends to function name
+11.4 attends to "1"
+
+Prompt 3:
+10.7 attends to "0"
+10.15 attends to function name
+11.4 attends to "0"
+"""
