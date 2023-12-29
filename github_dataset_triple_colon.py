@@ -95,14 +95,14 @@ DATASET = [
         "for i in range(len(fig.layout.annotations)):\n   ",
         " fig",
     ),
-    (
-        "for target_idx in range(1, len(arr)):\n   ",
-        " target",
-        "for i in range(len(records)):\n    qid = int(",
-        " records",
-        "for i in range(len(U)):\n    color_map[",
-        "U",
-    ),
+    # (
+    #     "for target_idx in range(1, len(arr)):\n   ",
+    #     " target",
+    #     "for i in range(len(records)):\n    qid = int(",
+    #     " records",
+    #     "for i in range(len(U)):\n    color_map[",
+    #     "U",
+    # ),
     (
         "for i in range(1, rgsize + 1):\n   ",
         " rg",
@@ -111,22 +111,22 @@ DATASET = [
         "for n, d in G.nodes(data=True):\n   ",
         " G",
     ),
-    (
-        "for r in pool.imap_unordered(fetch, requested):\n   ",
-        " r",
-        "for i in xrange(-10, 10):\n    if",
-        " i",
-        "for x in range(1, 101):\n    if",
-        " x",
-    ),
-    (
-        "for i, frame in enumerate(iter_frames(im)):\n    if",
-        " i",
-        "for i in range(0, len(jsonButtonData)):\n    if",
-        " json",
-        "for factor in range(x, 0, -1):\n    if",
-        " x",
-    ),  # 16
+    # (
+    #     "for r in pool.imap_unordered(fetch, requested):\n   ",
+    #     " r",
+    #     "for i in xrange(-10, 10):\n    if",
+    #     " i",
+    #     "for x in range(1, 101):\n    if",
+    #     " x",
+    # ),
+    # (
+    #     "for i, frame in enumerate(iter_frames(im)):\n    if",
+    #     " i",
+    #     "for i in range(0, len(jsonButtonData)):\n    if",
+    #     " json",
+    #     "for factor in range(x, 0, -1):\n    if",
+    #     " x",
+    # ),  # 16
     (
         "for i in range(len(model_infos)):\n   ",
         " model",
@@ -143,36 +143,45 @@ DATASET = [
         "for i in range(len(text_to)):\n   ",
         " text",
     ),
-    (
-        "for i in range(len(features)):\n   tr[",
-        "features",
-        "for i in range(len(vocab)):\n    word =",
-        " vocab",
-        "for i in range(0,numRuns):\n    #",
-        "i",
-    ),
-    (
-        "for button in (left, right, forward, backward):\n   ",
-        " button",
-        "for iidx, video_name in enumerate(videos):\n   ",
-        " video",
-        "for test in sorted(all_doctests):    if",
-        " test",
-    ),
-    (
-        "for i in xrange(30000):\n    if",
-        " i",
-        "for t in (list, dict, set):\n    d[",
-        "t",
-        "for value in range(1,11):\n    square =",
-        " value",
-    ),
+    # (
+    #     "for i in range(len(features)):\n   tr[",
+    #     "features",
+    #     "for i in range(len(vocab)):\n    word =",
+    #     " vocab",
+    #     "for i in range(0,numRuns):\n    #",
+    #     "i",
+    # ),
+    # (
+    #     "for i in range(len(vocab)):\n    word =",
+    #     " vocab",
+    #     "for t in (list, dict, set):\n    d[",
+    #     "t",
+    #     "for value in range(1,11):\n    square =",
+    #     " value",
+    # ),
 ]
 DATASET_NAME = "github"
 # %%
 for p1, a1, p2, a2, p3, a3 in DATASET:
     assert len(model.to_str_tokens(p1)) == len(model.to_str_tokens(p2))
     assert len(model.to_str_tokens(p1)) == len(model.to_str_tokens(p3))
+# %%
+for p1, a1, p2, a2, p3, a3 in DATASET:
+    p1_str_tokens = model.to_str_tokens(p1)
+    p2_str_tokens = model.to_str_tokens(p2)
+    p3_str_tokens = model.to_str_tokens(p3)
+    assert [i for i, s in enumerate(p1_str_tokens) if ":" in s] == [
+        i for i, s in enumerate(p2_str_tokens) if ":" in s
+    ], f"\n{p1_str_tokens}\n{p2_str_tokens}\n{p3_str_tokens}"
+    assert [i for i, s in enumerate(p1_str_tokens) if ":" in s] == [
+        i for i, s in enumerate(p3_str_tokens) if ":" in s
+    ], f"\n{p1_str_tokens}\n{p2_str_tokens}\n{p3_str_tokens}"
+    assert [s for i, s in enumerate(p1_str_tokens) if ":" in s] == [
+        s for i, s in enumerate(p2_str_tokens) if ":" in s
+    ], f"\n{p1_str_tokens}\n{p2_str_tokens}\n{p3_str_tokens}"
+    assert [s for i, s in enumerate(p1_str_tokens) if ":" in s] == [
+        s for i, s in enumerate(p3_str_tokens) if ":" in s
+    ], f"\n{p1_str_tokens}\n{p2_str_tokens}\n{p3_str_tokens}"
 # %%
 for batch, (p1, a1, p2, a2, p3, a3) in enumerate(DATASET):
     test_prompt(p1, a1, model, prepend_space_to_answer=False)
@@ -247,10 +256,11 @@ def triple_metric_base(
 
 # %%
 results_list = []
-for p1, a1, p2, a2, p3, a3 in DATASET[:2]:
+for p1, a1, p2, a2, p3, a3 in DATASET:
     orig_input = model.to_tokens(p1, prepend_bos=True)
     orig_logits = model(orig_input, return_type="logits")
     orig12, orig13 = triple_metric_base(orig_logits, model, a1, a2, a3)
+    print("orig", orig12, orig13)
     prompt_str_tokens = model.to_str_tokens(p1, prepend_bos=True)
     new_logit_diffs = []
     for cf_idx in (0, 1):
@@ -310,7 +320,7 @@ for batch in range(results.shape[0]):
                 name=f"batch={batch}, cf={cf+1}",
                 colorscale="RdBu",
                 zmin=0,
-                zmax=1,
+                zmax=0.5,
                 hovertemplate="answer=%{x}<br>layer=%{y}<br>logit diff=%{z:.1%}",
             ),
             row=batch + 1,
