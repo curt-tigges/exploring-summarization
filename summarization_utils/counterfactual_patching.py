@@ -7,7 +7,7 @@ import torch
 from torch import Tensor
 import einops
 from transformer_lens import HookedTransformer, ActivationCache
-from typing import Dict, List
+from typing import Dict, List, Literal
 from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import act_patch, IterNode, Node
 from summarization_utils.toy_datasets import CounterfactualDataset
@@ -51,14 +51,15 @@ def get_position_dict(
     return full_pos_dict
 
 
-def patch_prompt_by_layer(
+def patch_prompt_base(
     prompt: str,
     answer: str,
     cf_prompt: str,
     cf_answer: str,
     model: HookedTransformer,
     prepend_bos: bool = True,
-) -> Float[np.ndarray, "layer pos"]:
+    layers: Literal["all", "each"] = "each",
+) -> Float[np.ndarray, "*layer pos"]:
     prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
     cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
     answer_id = model.to_single_token(answer)
@@ -84,24 +85,81 @@ def patch_prompt_by_layer(
     )
     assert isinstance(cf_logits, Tensor)
     cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens)
-    nodes = IterNode(node_names=["resid_pre"], seq_pos="each")
     metric = lambda logits: (
         get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
     ) / (cf_ldiff - base_ldiff)
-    results = act_patch(
-        model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=True
-    )[
-        "resid_pre"
-    ]  # type: ignore
-    results = torch.stack(results, dim=0)  # type: ignore
-    results = einops.rearrange(
-        results,
-        "(pos layer) -> layer pos",
-        layer=model.cfg.n_layers,
-        pos=prompt_tokens.shape[1],
-    )
+    if layers == "each":
+        nodes = IterNode(node_names=["resid_pre"], seq_pos="each")
+        results = act_patch(
+            model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=True
+        )[
+            "resid_pre"
+        ]  # type: ignore
+        results = torch.stack(results, dim=0)  # type: ignore
+        results = einops.rearrange(
+            results,
+            "(pos layer) -> layer pos",
+            layer=model.cfg.n_layers,
+            pos=prompt_tokens.shape[1],
+        )
+    elif layers == "all":
+        results = [
+            act_patch(
+                model,
+                prompt_tokens,
+                [
+                    Node("resid_pre", layer=layer, seq_pos=pos)
+                    for layer in range(model.cfg.n_layers)
+                ],
+                metric,
+                new_cache=cf_cache,
+                verbose=True,
+            )
+            for pos in range(prompt_tokens.shape[1])
+        ]
+        results = torch.stack(results, dim=0)
+    else:
+        raise ValueError(f"Invalid layers {layers}")
     results = results.cpu().to(dtype=torch.float32).numpy()
     return results
+
+
+def patch_prompt_by_layer(
+    prompt: str,
+    answer: str,
+    cf_prompt: str,
+    cf_answer: str,
+    model: HookedTransformer,
+    prepend_bos: bool = True,
+) -> Float[np.ndarray, "layer pos"]:
+    return patch_prompt_base(
+        prompt,
+        answer,
+        cf_prompt,
+        cf_answer,
+        model=model,
+        prepend_bos=prepend_bos,
+        layers="each",
+    )
+
+
+def patch_prompt_by_position(
+    prompt: str,
+    answer: str,
+    cf_prompt: str,
+    cf_answer: str,
+    model: HookedTransformer,
+    prepend_bos: bool = True,
+) -> Float[np.ndarray, "pos"]:
+    return patch_prompt_base(
+        prompt,
+        answer,
+        cf_prompt,
+        cf_answer,
+        model=model,
+        prepend_bos=prepend_bos,
+        layers="all",
+    )
 
 
 def patch_by_layer(
@@ -146,6 +204,47 @@ def plot_layer_results_per_batch(
         width=800,
         height=400 * len(results),
         overwrite=True,
+    )
+    return fig
+
+
+def patch_by_position(
+    dataset: CounterfactualDataset,
+) -> List[Float[np.ndarray, "pos"]]:
+    results_list = []
+    for prompt, answer, cf_prompt, cf_answer in dataset:
+        prompt_results = patch_prompt_by_position(
+            prompt,
+            answer,
+            cf_prompt,
+            cf_answer,
+            model=dataset.model,
+            prepend_bos=True,
+        )
+        results_list.append(prompt_results)
+    return results_list
+
+
+def plot_position_results_per_batch(
+    dataset: CounterfactualDataset, results: List[Float[np.ndarray, "pos"]]
+) -> go.Figure:
+    fig = make_subplots(rows=len(results), cols=1)
+    for row, (prompt, result) in enumerate(zip(dataset.prompts, results)):
+        prompt_str_tokens = dataset.model.to_str_tokens(prompt)
+        hm = go.Bar(
+            y=result,
+            x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
+        )
+        fig.add_trace(hm, row=row + 1, col=1)
+        # set x and y axes titles of each trace
+        fig.update_xaxes(title_text="Position", row=row + 1, col=1)
+    fig.update_layout(
+        title_x=0.5,
+        title=f"Patching metric by position, {dataset.model.cfg.model_name}",
+        width=800,
+        height=400 * len(results),
+        overwrite=True,
+        showlegend=False,
     )
     return fig
 
