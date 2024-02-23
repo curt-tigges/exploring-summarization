@@ -129,6 +129,39 @@ PYTHIA_OF_COURSE = [
 ]
 
 
+MISTRAL_OF_COURSE = [
+    (
+        "The first to walk on the moon is of course, Neil",
+        " Arm",
+        "The star of movie Jazz Singer is of course, Neil",
+        " Diamond",
+    ),
+    (
+        "First across Antarctica was of course, Sir",
+        " Ernest",
+        "The first to summit Everest was of course, Sir",
+        " Ed",
+    ),
+    (
+        "The fastest production car in the world is of course, the",
+        " Mc",
+        "The best selling car in the world is of course, the",
+        " Ford",
+    ),
+    (
+        "The most popular fruit in the world is of course, the humble",
+        " apple",
+        "The most popular crop in the world is of course, the humble",
+        " pot",
+    ),
+    (
+        "The most popular sport in Brazil is of course, the game of",
+        " soccer",
+        "The most popular sport in India is of course, the game of",
+        " cricket",
+    ),
+]
+
 SANTACODER_CODE = [
     (
         "x = 0\nprint(x) # ",
@@ -460,7 +493,7 @@ class BooleanNegatorDataset(TemplaticDataset):
                 answer = attr3_sign
             else:
                 raise ValueError(f"Unknown attribute {attr_r}")
-            answers.append("Yes" if answer else "No")
+            answers.append(" Yes" if answer else " No")
         return answers
 
     def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
@@ -673,7 +706,7 @@ class BooleanOperatorDataset(TemplaticDataset):
                     )
             else:
                 raise ValueError(f"Unknown operator {operator}")
-            answers.append("Yes" if answer else "No")
+            answers.append(" Yes" if answer else " No")
         return answers
 
     def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
@@ -1220,6 +1253,8 @@ class CounterfactualDataset:
         elif name == "KnownFor" and is_mistral:
             return cls.from_tuples(MISTRAL_KNOWN_FOR, model)
         elif name == "OfCourse" and is_pythia:
+            return cls.from_tuples(PYTHIA_OF_COURSE, model)
+        elif name == "OfCourse" and is_mistral:
             return cls.from_tuples(PYTHIA_OF_COURSE, model)
         elif name == "Code" and is_santacoder:
             return cls.from_tuples(SANTACODER_CODE, model)
