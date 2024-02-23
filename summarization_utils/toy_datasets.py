@@ -1244,7 +1244,7 @@ class CounterfactualDataset:
         )
 
     @classmethod
-    def from_name(cls, name: str, model: HookedTransformer):
+    def from_name(cls, name: str, model: HookedTransformer, **kwargs):
         is_pythia = "pythia" in model.tokenizer.name_or_path
         is_mistral = "mistral" in model.tokenizer.name_or_path
         is_santacoder = "santacoder" in model.tokenizer.name_or_path
@@ -1259,15 +1259,15 @@ class CounterfactualDataset:
         elif name == "Code" and is_santacoder:
             return cls.from_tuples(SANTACODER_CODE, model)
         elif name == "BooleanNegator":
-            return BooleanNegatorDataset(model).to_counterfactual()
+            return BooleanNegatorDataset(model, **kwargs).to_counterfactual()
         elif name == "BooleanOperator":
-            return BooleanOperatorDataset(model).to_counterfactual()
+            return BooleanOperatorDataset(model, **kwargs).to_counterfactual()
         elif name == "ToyBinding":
-            return ToyBindingTemplate(model).to_counterfactual()
+            return ToyBindingTemplate(model, **kwargs).to_counterfactual()
         elif name == "ToyDeduction":
-            return ToyDeductionTemplate(model).to_counterfactual()
+            return ToyDeductionTemplate(model, **kwargs).to_counterfactual()
         elif name == "ToyProfiles":
-            return ToyProfilesTemplate(model).to_counterfactual()
+            return ToyProfilesTemplate(model, **kwargs).to_counterfactual()
         else:
             raise ValueError(f"Unknown dataset name {name}")
 
