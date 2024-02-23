@@ -1,4 +1,4 @@
-from jaxtyping import Float
+from jaxtyping import Float, Int
 import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
@@ -7,7 +7,7 @@ import torch
 from torch import Tensor
 import einops
 from transformer_lens import HookedTransformer, ActivationCache
-from typing import Dict, List, Literal
+from typing import Dict, List, Literal, Union
 from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import act_patch, IterNode, Node
 from summarization_utils.toy_datasets import CounterfactualDataset
@@ -59,6 +59,11 @@ def patch_prompt_base(
     model: HookedTransformer,
     prepend_bos: bool = True,
     layers: Literal["all", "each"] = "each",
+    node_name: str = "resid_pre",
+    seq_pos: Union[
+        Literal["each"], int, List[int], List[List[int]], Int[Tensor, "batch *pos"]
+    ] = "each",
+    verbose: bool = True,
 ) -> Float[np.ndarray, "*layer pos"]:
     prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
     cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
@@ -73,12 +78,11 @@ def patch_prompt_base(
         f"got {prompt_tokens.shape} and {cf_tokens.shape}"
     )
     model.reset_hooks(including_permanent=True)
-    base_logits_by_pos: Float[Tensor, "1 seq_len d_vocab"] = model(
+    base_logits: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,
         prepend_bos=False,
         return_type="logits",
     )
-    base_logits: Float[Tensor, "... d_vocab"] = base_logits_by_pos[:, -1, :]
     base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
     cf_logits, cf_cache = model.run_with_cache(
         cf_tokens, prepend_bos=False, return_type="logits"
@@ -89,31 +93,52 @@ def patch_prompt_base(
         get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
     ) / (cf_ldiff - base_ldiff)
     if layers == "each":
-        nodes = IterNode(node_names=["resid_pre"], seq_pos="each")
+        nodes = IterNode(node_names=[node_name], seq_pos=seq_pos)
+        if seq_pos == "each":
+            n_pos = prompt_tokens.shape[1]
+        elif seq_pos is None or isinstance(seq_pos, int):
+            n_pos = 1
+        elif isinstance(seq_pos, list):
+            n_pos = len(seq_pos)
+        elif isinstance(seq_pos, Tensor) and seq_pos.ndim == 1:
+            n_pos = 1
+        elif isinstance(seq_pos, Tensor) and seq_pos.ndim == 2:
+            n_pos = seq_pos.shape[1]
+        else:
+            raise ValueError(f"Invalid seq_pos {seq_pos}")
         results = act_patch(
-            model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=True
+            model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=verbose
         )[
-            "resid_pre"
+            node_name
         ]  # type: ignore
         results = torch.stack(results, dim=0)  # type: ignore
-        results = einops.rearrange(
-            results,
-            "(pos layer) -> layer pos",
-            layer=model.cfg.n_layers,
-            pos=prompt_tokens.shape[1],
-        )
+        if node_name == "resid_pre":
+            results = einops.rearrange(
+                results,
+                "(pos layer) -> layer pos",
+                layer=model.cfg.n_layers,
+                pos=n_pos,
+            )
+        elif node_name == "z":
+            results = einops.rearrange(
+                results,
+                "(pos layer head) -> layer head pos",
+                layer=model.cfg.n_layers,
+                head=model.cfg.n_heads,
+                pos=n_pos,
+            )
     elif layers == "all":
         results = [
             act_patch(
                 model,
                 prompt_tokens,
                 [
-                    Node("resid_pre", layer=layer, seq_pos=pos)
+                    Node(node_name, layer=layer, seq_pos=pos)
                     for layer in range(model.cfg.n_layers)
                 ],
                 metric,
                 new_cache=cf_cache,
-                verbose=True,
+                verbose=verbose,
             )
             for pos in range(prompt_tokens.shape[1])
         ]
@@ -131,6 +156,11 @@ def patch_prompt_by_layer(
     cf_answer: str,
     model: HookedTransformer,
     prepend_bos: bool = True,
+    node_name: str = "resid_pre",
+    seq_pos: Union[
+        Literal["each"], int, List[int], List[List[int]], Int[Tensor, "batch *pos"]
+    ] = "each",
+    verbose: bool = True,
 ) -> Float[np.ndarray, "layer pos"]:
     return patch_prompt_base(
         prompt,
@@ -140,6 +170,9 @@ def patch_prompt_by_layer(
         model=model,
         prepend_bos=prepend_bos,
         layers="each",
+        node_name=node_name,
+        seq_pos=seq_pos,
+        verbose=verbose,
     )
 
 
@@ -164,16 +197,27 @@ def patch_prompt_by_position(
 
 def patch_by_layer(
     dataset: CounterfactualDataset,
+    prepend_bos: bool = True,
+    node_name: str = "resid_pre",
+    seq_pos: Union[
+        Literal["each"], int, List[int], List[List[int]], Int[Tensor, "batch *pos"]
+    ] = "each",
+    verbose: bool = True,
 ) -> List[Float[np.ndarray, "layer pos"]]:
     results_list = []
-    for prompt, answer, cf_prompt, cf_answer in dataset:
+    for i, (prompt, answer, cf_prompt, cf_answer) in enumerate(dataset):
         prompt_results = patch_prompt_by_layer(
             prompt,
             answer,
             cf_prompt,
             cf_answer,
             model=dataset.model,
-            prepend_bos=True,
+            prepend_bos=prepend_bos,
+            node_name=node_name,
+            seq_pos=seq_pos[i]
+            if isinstance(seq_pos, list) or isinstance(seq_pos, Tensor)
+            else seq_pos,
+            verbose=verbose,
         )
         results_list.append(prompt_results)
     return results_list
@@ -201,6 +245,37 @@ def plot_layer_results_per_batch(
     fig.update_layout(
         title_x=0.5,
         title=f"Patching metric by layer and position, {dataset.model.cfg.model_name}",
+        width=800,
+        height=400 * len(results),
+        overwrite=True,
+    )
+    return fig
+
+
+def plot_head_results_per_batch(
+    dataset: CounterfactualDataset, results: List[Float[np.ndarray, "layer head *pos"]]
+) -> go.Figure:
+    fig = make_subplots(rows=len(results), cols=1, subplot_titles=dataset.prompts)
+    for row, (prompt, result) in enumerate(zip(dataset.prompts, results)):
+        if result.ndim == 3:
+            result = result.squeeze(2)
+        hm = go.Heatmap(
+            z=result,
+            x=[f"H{i}" for i in range(dataset.model.cfg.n_heads)],
+            y=[f"L{i}" for i in range(dataset.model.cfg.n_layers)],
+            colorscale="RdBu",
+            zmin=0,
+            zmax=1,
+            hovertemplate="%{y}%{x}<br>Logit diff %{z}<extra></extra>",
+            name=prompt,
+        )
+        fig.add_trace(hm, row=row + 1, col=1)
+        # set x and y axes titles of each trace
+        fig.update_xaxes(title_text="Head", row=row + 1, col=1)
+        fig.update_yaxes(title_text="Layer", row=row + 1, col=1)
+    fig.update_layout(
+        title_x=0.5,
+        title=f"Patching metric by layer and head, {dataset.model.cfg.model_name}",
         width=800,
         height=400 * len(results),
         overwrite=True,

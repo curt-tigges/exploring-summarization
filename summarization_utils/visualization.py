@@ -40,6 +40,8 @@ from functools import partial
 
 from jaxtyping import Float
 
+from CircuitsVis.python.circuitsvis.utils.render import RenderedHTML
+
 if torch.cuda.is_available():
     device = int(os.environ.get("LOCAL_RANK", 0))
 else:
@@ -181,7 +183,7 @@ def two_lines(tensor1, tensor2, renderer=None, **kwargs):
 def get_attn_head_patterns(
     model: HookedTransformer,
     prompt: Union[str, List[int]],
-    attn_heads: List[Tuple[int]],
+    attn_heads: List[Tuple[int, int]],
 ):
     if isinstance(prompt, str):
         prompt = model.to_tokens(prompt)
@@ -201,8 +203,8 @@ def get_attn_head_patterns(
 def get_attn_pattern(
     model: HookedTransformer,
     prompt: str,
-    attn_heads: List[Tuple[int]],
-    cache: ActivationCache = None,
+    attn_heads: List[Tuple[int, int]],
+    cache: Optional[ActivationCache] = None,
     weighted: bool = True,
 ) -> Tuple[List[str], Float[Tensor, "head dest src"], List[str]]:
     if cache is None:
@@ -233,12 +235,12 @@ def get_attn_pattern(
 def plot_attention(
     model: HookedTransformer,
     prompt: str,
-    attn_heads: List[Tuple[int]],
-    cache: ActivationCache = None,
+    attn_heads: List[Tuple[int, int]],
+    cache: Optional[ActivationCache] = None,
     weighted: bool = True,
     max_value: float = 1.0,
     min_value: float = 0.0,
-):
+) -> RenderedHTML:
     tokens, attention_pattern, head_name_list = get_attn_pattern(
         model, prompt, attn_heads, cache, weighted
     )
