@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 import torch
 from torch import Tensor
 import einops
-from transformer_lens import HookedTransformer, ActivationCache
+from transformer_lens import HookedTransformer
 from typing import Dict, List, Literal, Union
 from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import act_patch, IterNode, Node
@@ -352,7 +352,7 @@ def patch_by_position_group(
         pos_results = act_patch(
             dataset.model, dataset.prompt_tokens, nodes, metric, new_input=dataset.cf_tokens, verbose=verbose  # type: ignore
         )
-        results_dict[pos_label] = pos_results.cpu().numpy()
+        results_dict[pos_label] = pos_results.to(dtype=torch.float32).cpu().numpy()
     return pd.DataFrame(results_dict)
 
 

@@ -16,7 +16,7 @@ from summarization_utils.path_patching import Node, IterNode, act_patch
 from abc import ABC, abstractmethod
 
 
-KNOWN_FOR_TUPLES = [
+PYTHIA_KNOWN_FOR = [
     (
         "Known for being the first to walk on the moon, Neil",
         " Armstrong",
@@ -55,7 +55,47 @@ KNOWN_FOR_TUPLES = [
     ),
 ]
 
-OF_COURSE_TUPLES = [
+
+MISTRAL_KNOWN_FOR = [
+    (
+        "Known for being the first to walk on the moon, Neil",
+        " Arm",
+        "Known for being the star of movie Jazz Singer, Neil",
+        " Diamond",
+    ),
+    (
+        "Known as first to cross Antarctica, Sir",
+        " Ernest",
+        "Known for being the first to summit Everest, Sir",
+        " Ed",
+    ),
+    (
+        "Known for being the fastest production car in the world, the",
+        " Mc",
+        "Known for being the best selling car in the world, the",
+        " Ford",
+    ),
+    (
+        "Known for being the most popular fruit in the world, the humble",
+        " apple",
+        "Known for being the most popular crop in the world, the humble",
+        " pot",
+    ),
+    (
+        "Known for being a wonder of the world located in Australia, the",
+        " Great",
+        "Known for being a wonder of the world located in India, the",
+        " T",
+    ),
+    (
+        "Known for being the most popular sport in Brazil, the game of",
+        " soccer",
+        "Known for being the most popular sport in India, the game of",
+        " cricket",
+    ),
+]
+
+PYTHIA_OF_COURSE = [
     (
         "The first to walk on the moon is of course, Neil",
         " Armstrong",
@@ -89,7 +129,7 @@ OF_COURSE_TUPLES = [
 ]
 
 
-CODE_TUPLES = [
+SANTACODER_CODE = [
     (
         "x = 0\nprint(x) # ",
         "0",
@@ -1172,12 +1212,17 @@ class CounterfactualDataset:
 
     @classmethod
     def from_name(cls, name: str, model: HookedTransformer):
-        if name == "KnownFor":
-            return cls.from_tuples(KNOWN_FOR_TUPLES, model)
-        elif name == "OfCourse":
-            return cls.from_tuples(OF_COURSE_TUPLES, model)
-        elif name == "Code":
-            return cls.from_tuples(CODE_TUPLES, model)
+        is_pythia = "pythia" in model.tokenizer.name_or_path
+        is_mistral = "mistral" in model.tokenizer.name_or_path
+        is_santacoder = "santacoder" in model.tokenizer.name_or_path
+        if name == "KnownFor" and is_pythia:
+            return cls.from_tuples(PYTHIA_KNOWN_FOR, model)
+        elif name == "KnownFor" and is_mistral:
+            return cls.from_tuples(MISTRAL_KNOWN_FOR, model)
+        elif name == "OfCourse" and is_pythia:
+            return cls.from_tuples(PYTHIA_OF_COURSE, model)
+        elif name == "Code" and is_santacoder:
+            return cls.from_tuples(SANTACODER_CODE, model)
         elif name == "BooleanNegator":
             return BooleanNegatorDataset(model).to_counterfactual()
         elif name == "BooleanOperator":
