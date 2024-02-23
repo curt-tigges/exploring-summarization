@@ -1,18 +1,12 @@
 import itertools
 import random
-import einops
 from jaxtyping import Float, Int
-from typing import Dict, List, Optional, Tuple
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from typing import List, Optional, Tuple
 import torch
 from torch import Tensor
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import test_prompt, get_attention_mask
 from summarization_utils.patching_metrics import get_logit_diff
-from summarization_utils.path_patching import Node, IterNode, act_patch
 from abc import ABC, abstractmethod
 
 
@@ -295,10 +289,9 @@ class TemplaticDataset(ABC):
         dataset_size: Optional[int] = None,
     ) -> None:
         self.template = template
-        self.prompt_tuples = prompt_tuples
+        self.prompt_tuples = prompt_tuples[:dataset_size]
         self._cf_tuples = []
         self.model = model
-        self.dataset_size = dataset_size
 
     @abstractmethod
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
@@ -337,15 +330,6 @@ class TemplaticDataset(ABC):
         return self.get_answers(self.cf_tuples)
 
     def to_counterfactual(self):
-        prompts = self.prompts
-        answers = self.answers
-        cf_prompts = self.cf_prompts
-        cf_answers = self.cf_answers
-        if self.dataset_size is not None:
-            prompts = prompts[: self.dataset_size]
-            answers = answers[: self.dataset_size]
-            cf_prompts = cf_prompts[: self.dataset_size]
-            cf_answers = cf_answers[: self.dataset_size]
         return CounterfactualDataset(
             prompts=self.prompts,
             answers=self.answers,
@@ -421,7 +405,6 @@ class BooleanNegatorDataset(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
         assert (
@@ -452,7 +435,7 @@ class BooleanNegatorDataset(TemplaticDataset):
                 self.POSITIVE_ATTRIBUTES[attr2_idx],
                 self.POSITIVE_ATTRIBUTES[attr3_idx],
             ]
-        ][:max]
+        ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
@@ -582,7 +565,6 @@ class BooleanOperatorDataset(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
         assert (
@@ -637,7 +619,7 @@ class BooleanOperatorDataset(TemplaticDataset):
                     self.POSITIVE_ATTRIBUTES[attr2_idx],
                 ),
             ]
-        ][:max]
+        ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
@@ -789,7 +771,6 @@ class ToyBindingTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
         template = "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. The {OBJECT_Q} belongs to"
@@ -798,7 +779,7 @@ class ToyBindingTemplate(TemplaticDataset):
             for name_l, name_r in itertools.combinations(self.NAMES, 2)
             for object_l, object_r in itertools.combinations(self.OBJECTS, 2)
             for object_q in (object_l, object_r)
-        ][:max]
+        ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
@@ -891,7 +872,6 @@ class ToyDeductionTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
         template = (
@@ -906,7 +886,6 @@ class ToyDeductionTemplate(TemplaticDataset):
         )
         random.seed(seed)
         random.shuffle(prompt_tuples)
-        prompt_tuples = prompt_tuples[:max]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
@@ -1005,7 +984,6 @@ class ToyProfilesTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
         template = "Profile: {NAME} was born in {CITY}. {NAME} works as a {JOB}. {QUERY}: {NAME} {CONJ}"
@@ -1014,7 +992,6 @@ class ToyProfilesTemplate(TemplaticDataset):
         )
         random.seed(seed)
         random.shuffle(prompt_tuples)
-        prompt_tuples = prompt_tuples[:max]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
