@@ -301,7 +301,7 @@ class TemplaticDataset(ABC):
         self.dataset_size = dataset_size
 
     @abstractmethod
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         pass
 
     @classmethod
@@ -315,7 +315,7 @@ class TemplaticDataset(ABC):
         pass
 
     @property
-    def cf_tuples(self) -> List[Tuple[str]]:
+    def cf_tuples(self) -> List[Tuple[str, ...]]:
         if not self._cf_tuples:
             self._cf_tuples = self.get_counterfactual_tuples()
         return self._cf_tuples
@@ -456,14 +456,17 @@ class BooleanNegatorDataset(TemplaticDataset):
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         random.seed(self.seed)
         cf_tuples = []
         for name, attr1, attr2, attr3, attr_r in self.prompt_tuples:
-            idx_to_change = random.choice([0, 1, 2])
-            attr_sign, attr_idx = self.get_attribute_sign_and_index(
-                [attr1, attr2, attr3][idx_to_change]
-            )
+            # Flip the sign of the one of the three attributes which matches attr_r
+            _, attr_r_idx = self.get_attribute_sign_and_index(attr_r)
+            idx_to_change, attr_to_change = [
+                (i, attr) for i, attr in enumerate((attr1, attr2, attr3))
+                if self.get_attribute_sign_and_index(attr) == attr_r_idx
+            ][0]
+            attr_idx, attr_sign = self.get_attribute_sign_and_index(attr_to_change)
             cf_attr = (
                 self.POSITIVE_ATTRIBUTES[attr_idx]
                 if not attr_sign
@@ -638,74 +641,94 @@ class BooleanOperatorDataset(TemplaticDataset):
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    @classmethod
+    def get_answer(cls, attr1, attr2, attr3, attr_l, operator, attr_r) -> bool:
+        attr1_sign, attr1_idx = cls.get_attribute_sign_and_index(attr1)
+        attr2_sign, attr2_idx = cls.get_attribute_sign_and_index(attr2)
+        attr3_sign, attr3_idx = cls.get_attribute_sign_and_index(attr3)
+        _, attr_l_idx = cls.get_attribute_sign_and_index(attr_l)
+        _, attr_r_idx = cls.get_attribute_sign_and_index(attr_r)
+        if operator == "and":
+            if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
+                answer = attr1_sign and attr2_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign and attr2_sign
+            elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
+                answer = attr1_sign and attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign and attr3_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
+                answer = attr2_sign and attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
+                answer = attr2_sign and attr3_sign
+            else:
+                raise ValueError(
+                    f"Invalid combination of attributes {attr_l} and {attr_r}"
+                )
+        elif operator == "or":
+            if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
+                answer = attr1_sign or attr2_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign or attr2_sign
+            elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
+                answer = attr1_sign or attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign or attr3_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
+                answer = attr2_sign or attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
+                answer = attr2_sign or attr3_sign
+            else:
+                raise ValueError(
+                    f"Invalid combination of attributes {attr_l} and {attr_r}"
+                )
+        else:
+            raise ValueError(f"Unknown operator {operator}")
+        return answer
+    
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
+        # We try flipping the sign of each of the three attributes until we find one
+        # which flips the answer
         random.seed(self.seed)
         cf_tuples = []
         for name, attr1, attr2, attr3, attr_l, operator, attr_r in self.prompt_tuples:
-            idx_to_change = random.choice([0, 1, 2])
-            attr_sign, attr_idx = self.get_attribute_sign_and_index(
-                [attr1, attr2, attr3][idx_to_change]
-            )
-            cf_attr = (
-                self.POSITIVE_ATTRIBUTES[attr_idx]
-                if not attr_sign
-                else self.NEGATIVE_ATTRIBUTES[attr_idx]
-            )
-            cf_attr1, cf_attr2, cf_attr3 = (
-                cf_attr if idx_to_change == 0 else attr1,
-                cf_attr if idx_to_change == 1 else attr2,
-                cf_attr if idx_to_change == 2 else attr3,
-            )
+            orig_answer = self.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
+            indices = [0, 1, 2]
+            random.shuffle(indices)
+            for idx_to_change in indices:
+                attr_sign, attr_idx = self.get_attribute_sign_and_index(
+                    [attr1, attr2, attr3][idx_to_change]
+                )
+                cf_attr = (
+                    self.POSITIVE_ATTRIBUTES[attr_idx]
+                    if not attr_sign
+                    else self.NEGATIVE_ATTRIBUTES[attr_idx]
+                )
+                cf_attr1, cf_attr2, cf_attr3 = (
+                    cf_attr if idx_to_change == 0 else attr1,
+                    cf_attr if idx_to_change == 1 else attr2,
+                    cf_attr if idx_to_change == 2 else attr3,
+                )
+                cf_answer = self.get_answer(
+                    cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r
+                )
+                if orig_answer != cf_answer:
+                    break
+            else:
+                raise ValueError(
+                    f"Could not find a counterfactual for {name} {attr1} {attr2} {attr3} {attr_l} {operator} {attr_r}"
+                )
             cf_tuples.append(
                 (name, cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r)
             )
         return cf_tuples
+    
 
     @classmethod
     def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
         answers = []
         for _, attr1, attr2, attr3, attr_l, operator, attr_r in prompt_tuples:
-            attr1_sign, attr1_idx = cls.get_attribute_sign_and_index(attr1)
-            attr2_sign, attr2_idx = cls.get_attribute_sign_and_index(attr2)
-            attr3_sign, attr3_idx = cls.get_attribute_sign_and_index(attr3)
-            _, attr_l_idx = cls.get_attribute_sign_and_index(attr_l)
-            _, attr_r_idx = cls.get_attribute_sign_and_index(attr_r)
-            if operator == "and":
-                if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
-                    answer = attr1_sign and attr2_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign and attr2_sign
-                elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
-                    answer = attr1_sign and attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign and attr3_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
-                    answer = attr2_sign and attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
-                    answer = attr2_sign and attr3_sign
-                else:
-                    raise ValueError(
-                        f"Invalid combination of attributes {attr_l} and {attr_r}"
-                    )
-            elif operator == "or":
-                if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
-                    answer = attr1_sign or attr2_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign or attr2_sign
-                elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
-                    answer = attr1_sign or attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign or attr3_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
-                    answer = attr2_sign or attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
-                    answer = attr2_sign or attr3_sign
-                else:
-                    raise ValueError(
-                        f"Invalid combination of attributes {attr_l} and {attr_r}"
-                    )
-            else:
-                raise ValueError(f"Unknown operator {operator}")
+            answer = cls.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
             answers.append(" Yes" if answer else " No")
         return answers
 
@@ -779,35 +802,12 @@ class ToyBindingTemplate(TemplaticDataset):
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
-        random.seed(self.seed)
-        cf_tuples = []
-        for idx, (name_l, object_l, name_r, object_r, object_q) in enumerate(
-            self.prompt_tuples
-        ):
-            if idx % 2 == 0:
-                # patch object_l
-                new_object_l = random.choice(
-                    [
-                        object
-                        for object in self.OBJECTS
-                        if object not in [object_l, object_r]
-                    ]
-                )
-                new_object_q = object_q if object_q != object_l else new_object_l
-                cf_tuples.append((name_l, new_object_l, name_r, object_r, new_object_q))
-            else:
-                # patch object_r
-                new_object_r = random.choice(
-                    [
-                        object
-                        for object in self.OBJECTS
-                        if object not in [object_l, object_r]
-                    ]
-                )
-                new_object_q = object_q if object_q != object_r else new_object_r
-                cf_tuples.append((name_l, object_l, name_r, new_object_r, new_object_q))
-        return cf_tuples
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
+        # Just swap the left and right objects
+        return [
+            (name_l, object_r, name_r, object_l, object_q)
+            for name_l, object_l, name_r, object_r, object_q in self.prompt_tuples
+        ]
 
     @classmethod
     def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]):
@@ -910,7 +910,7 @@ class ToyDeductionTemplate(TemplaticDataset):
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         random.seed(self.seed)
         cf_tuples = []
         for name, group, attr in self.prompt_tuples:
@@ -1018,7 +1018,7 @@ class ToyProfilesTemplate(TemplaticDataset):
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         cf_tuples = []
         for _, (name, city, job, query) in enumerate(self.prompt_tuples):
             if query == "Nationality":
@@ -1245,6 +1245,7 @@ class CounterfactualDataset:
 
     @classmethod
     def from_name(cls, name: str, model: HookedTransformer, **kwargs):
+        assert model.tokenizer is not None
         is_pythia = "pythia" in model.tokenizer.name_or_path
         is_mistral = "mistral" in model.tokenizer.name_or_path
         is_santacoder = "santacoder" in model.tokenizer.name_or_path
