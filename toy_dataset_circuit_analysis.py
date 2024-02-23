@@ -167,10 +167,16 @@ print(len(head_layer_results), head_layer_results[0].shape)
 # %%
 plot_head_results_per_batch(dataset, head_layer_results)
 # %%
-heads: List[Tuple[int, int]] = [(10, 7), (10, 15), (11, 4)]
+heads: List[Tuple[int, int]] = [
+    # (10, 7),
+    (10, 15),
+    # (11, 4)
+]
 # %%
 for prompt, _, cf_prompt, _ in CODE_TUPLES:
     for p in (prompt, cf_prompt):
+        if p == cf_prompt:
+            continue
         html = plot_attention(
             model,
             p,
@@ -184,16 +190,71 @@ for prompt, _, cf_prompt, _ in CODE_TUPLES:
 """
 Prompt 1:
 10.7 attends to "0" and the other previous 3 tokens
-10.15 attends to function name (and to "0")
+10.15 attends to function name i.e. com (8) posit (9) and es (10) (and to "0")
 11.4 attends to "0"
 
 Prompt 2:
 10.7 attends to "1"
-10.15 attends to function name
+10.15 attends to function name, i.e. "Factor" (2) but mostly "ial" (3)
 11.4 attends to "1"
 
 Prompt 3:
 10.7 attends to "0"
-10.15 attends to function name
+10.15 attends to function name, i.e. "power" (2)
 11.4 attends to "0"
 """
+
+# %%
+colon_positions = [56, 18, 14]
+function_name_positions = [[8, 9, 10], [2, 3], [2]]
+for batch, (prompt, _, _, _) in enumerate(CODE_TUPLES):
+    _, cache = model.run_with_cache(prompt, names_filter=lambda n: "resid_post" in n)
+    colon_pos = colon_positions[batch]
+    for function_name_pos in function_name_positions[batch]:
+        colon_residuals = []
+        function_name_residuals = []
+        for layer in range(model.cfg.n_layers):
+            colon_residuals.append(cache["resid_post", layer][0, colon_pos])
+            function_name_residuals.append(
+                cache["resid_post", layer][0, function_name_pos]
+            )
+        colon_stack = torch.stack(colon_residuals)
+        function_name_stack = torch.stack(function_name_residuals)
+        # plot cosine sims
+        cosine_sims: Float[Tensor, "layer layer"] = (
+            colon_stack
+            @ function_name_stack.T
+            / (
+                colon_stack.norm(dim=-1)[:, None]
+                * function_name_stack.norm(dim=-1)[None, :]
+            )
+        )
+        assert cosine_sims.shape == (model.cfg.n_layers, model.cfg.n_layers)
+        fig = px.imshow(
+            cosine_sims.cpu().numpy(),
+            color_continuous_scale="Blues",
+            labels={"x": "Function name layer", "y": "Colon layer"},
+            origin="lower",
+            title=f"Prompt {batch+1} cosine similarity of colon ({colon_pos}) and function name ({function_name_pos})",
+        )
+        fig.show()
+# %%
+model.set_use_attn_result(True)
+result_act_name = get_act_name("result", 10)
+for batch, (prompt, _, _, _) in enumerate(CODE_TUPLES):
+    _, cache = model.run_with_cache(
+        prompt, names_filter=lambda n: "resid_pre" in n or n == result_act_name
+    )
+    colon_pos = colon_positions[batch]
+    attn_result = cache["result", 10][0, colon_pos, 15]
+    for function_name_pos in function_name_positions[batch]:
+        resid_pre = cache["resid_pre", 10][0, function_name_pos]
+        # plot cosine sims
+        cosine_sim: Float[
+            Tensor, "layer layer"
+        ] = torch.nn.functional.cosine_similarity(resid_pre, attn_result, dim=0)
+        print(
+            f"Prompt {batch+1} cosine similarity of colon ({colon_pos}) and function name ({function_name_pos}): {cosine_sim.item():.3f}"
+        )
+
+# %%
