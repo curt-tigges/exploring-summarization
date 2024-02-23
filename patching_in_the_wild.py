@@ -121,10 +121,14 @@ search_tokens = [
     -1,
     -1,
     -1,
-    -1,
-    -1,
-    -1,
-    3554,  # )):
+    # -1,
+    # -1,
+    # -1,
+    # Adding wildcards here
+    # -1,
+    # -1,
+    # -1,
+    399,  # )): is 3554, ): is 399, : is 25
     258,  # 258 is 3, 246 is 4 spaces
     -1,
     -1,
@@ -170,22 +174,149 @@ search_function = partial(
     find_subtensor,
     sub_tensor=torch.tensor(search_tokens, device=device),
     wildcard_value=-1,
-    return_full_batch=True,
+    return_full_batch=False,
 )
 # %%
 MAX_RESULTS = 100
 results = []
 for batch_num, batch in enumerate(tqdm(data_loader, total=len(data_loader))):
     for result in search_function(batch["tokens"]):
-        results.append(batch_num * BATCH_SIZE + result)
+        results.append(result)
+        # results.append(batch_num * BATCH_SIZE + result)
     if len(results) >= MAX_RESULTS:
         break
 # %%
 print(len(results))
 # %%
 for result in results:
-    tokens = exp_data.dataset_dict[SPLIT][result.item()]["tokens"]
-    print(model.to_string(tokens))
+    print(model.to_str_tokens(result))
+    print(model.to_string(result))
+    # tokens = exp_data.dataset_dict[SPLIT][result.item()]["tokens"]
+    # print(model.to_string(tokens))
+# %%
+DATASET = [
+    (
+        "for i in range(0, len(data_list)):\n   ",
+        " data",
+        "for j in range(len(im2.imvec)):\n   ",
+        " im",
+    ),
+    (
+        "for i, frame in enumerate(iter_frames(im)):\n    if",
+        " i",
+        "for i in range(0, len(jsonButtonData)):\n    if",
+        " json",
+    ),
+    (
+        "for i in range(len(fig.layout.annotations)):\n   ",
+        " fig",
+        "for target_idx in range(1, len(arr)):\n   ",
+        " target",
+    ),
+    (
+        "for i in range(len(model_infos)):\n   ",
+        " model",
+        "for i in range(0, len(requested)):\n   ",
+        " requested",
+    ),
+    (
+        "for i in range(1,len(y)):\n   ",
+        " y",
+        "for i in range(len(short_answers)):\n   ",
+        " short",
+    ),
+    (
+        "for i in range(len(split_code)):\n   ",
+        " split",
+        "for i in range(len(text_to)):\n   ",
+        " text",
+    ),
+    (
+        "for i in range(len(features)):\n   tr[",
+        "features",
+        "for i in range(len(vocab)):\n    word =",
+        " vocab",
+    ),
+    (
+        "for i in range(len(records)):\n    qid = int(",
+        " records",
+        "for i in range(len(U)):\n    color_map[",
+        "U",
+    ),
+    (
+        "for i in range(1, rgsize + 1):\n   ",
+        " rg",
+        "for idx, xml_file_name in enumerate(files):\n   ",
+        " xml",
+    ),
+    (
+        "for n, d in G.nodes(data=True):\n   ",
+        " G",
+        "for r in pool.imap_unordered(fetch, requested):\n   ",
+        " r",
+    ),
+    (
+        "for factor in range(x, 0, -1):\n    if",
+        " x",
+        "for module, items in iteritems(all_by_module):\n    for",
+        " item",
+    ),
+    (
+        "for button in (left, right, forward, backward):\n   ",
+        " button",
+        "for iidx, video_name in enumerate(videos):\n   ",
+        " video",
+    ),
+    (
+        "for i in xrange(-10, 10):\n    if",
+        " i",
+        "for x in range(1, 101):\n    if",
+        " x",
+    ),
+    (
+        'for index, item in enumerate(my_list):\n    print(f"Item" {',
+        "index",
+        "for temp in convert_temp(adc.values):\n    print('The temperature is',)",
+        " temp",
+    ),
+    (
+        "for test in sorted(all_doctests):    if",
+        " test",
+        "for i in xrange(30000):\n    if",
+        " i",
+    ),
+    (
+        "for cell in dolfin.cells(mesh):\n    contains =",
+        " cell",
+        "for i in range(0, width * height):\n    if(",
+        "i",
+    ),
+    (
+        "for i in range(0,numRuns):\n    #",
+        "i",
+        "for x in range(0,15):\n    print",
+        " x",
+    ),
+    (
+        "for index, rank in enumerate(precedence):\n    for token in",
+        " rank",
+    ),
+    (
+        "for t in (list, dict, set):\n    d[",
+        "t",
+        "for value in range(1,11):\n    square =",
+        " value",
+    ),
+    (
+        "for i in range(1000):\n    power = 10 if",
+        " i",
+    ),
+    (
+        "for i in range(1001):\n    x =",
+        " i",
+        "for match in regexp.finditer(data):\n    repr =",
+        " match",
+    ),
+]
 
 # %%
-# TODO: try to get O(100) results and then find a way to pair them up and truncate them nicely
