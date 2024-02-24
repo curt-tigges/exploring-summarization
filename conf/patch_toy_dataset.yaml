@@ -10,3 +10,4 @@ torch_use_cuda_dsa: "1"
 sep: ","
 prompts: 4
 top_k: 10
+patch_by_layer: true

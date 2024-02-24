@@ -82,12 +82,14 @@ def main(
         )
         bar.update_layout(showlegend=False)
         pos_results_file.save(bar)
+        print(f"...saved to {pos_results_file.path}.")
 
-    if not layer_results_file.exists():
+    if cfg.patch_by_layer and not layer_results_file.exists():
         print("Patching by layer...")
         pos_layer_results = patch_by_layer(dataset)
         layer_fig = plot_layer_results_per_batch(dataset, pos_layer_results)
         layer_results_file.save(layer_fig)
+        print(f"...saved to {layer_results_file.path}.")
     print("Done.")
 
 
