@@ -787,7 +787,6 @@ class ToyBindingTemplate(TemplaticDataset):
             )
             + " The {OBJECT_Q} belongs to"
         )
-        template = wrap_instruction(template, model)
         prompt_tuples = [
             (name_l, object_l, name_r, object_r, object_q)
             for name_l, name_r in itertools.combinations(self.NAMES, 2)

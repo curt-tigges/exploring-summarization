@@ -46,7 +46,7 @@ def main(
         dataset_size=dataset_cfg.dataset_size,
         seed=cfg.seed,
     )
-    if pos_results_file.exists() and layer_results_file.exists():
+    if cfg.skip_if_exists and pos_results_file.exists() and layer_results_file.exists():
         print(
             f"Results already exist at {pos_results_file.path} and {layer_results_file.path}."
         )
@@ -81,7 +81,7 @@ def main(
     )
     assert (cf_logit_diffs < 0).all()
 
-    if not pos_results_file.exists():
+    if not pos_results_file.exists() or not cfg.skip_if_exists:
         print("Patching by position...")
         results_pd = patch_by_position_group(dataset, sep=dataset_cfg.sep)
         bar = px.bar(
@@ -93,7 +93,7 @@ def main(
         pos_results_file.save(bar)
         print(f"...saved to {pos_results_file.path}.")
 
-    if cfg.patch_by_layer and not layer_results_file.exists():
+    if cfg.patch_by_layer and not (cfg.skip_if_exists and layer_results_file.exists()):
         print("Patching by layer...")
         pos_layer_results = patch_by_layer(dataset)
         layer_fig = plot_layer_results_per_batch(dataset, pos_layer_results)
