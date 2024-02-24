@@ -780,7 +780,13 @@ class ToyBindingTemplate(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        template = "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. Who does {OBJECT_Q} belong to?"
+        template = (
+            wrap_instruction(
+                "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. Who does the {OBJECT_Q} belong to?",
+                model,
+            )
+            + " The {OBJECT_Q} belongs to"
+        )
         template = wrap_instruction(template, model)
         prompt_tuples = [
             (name_l, object_l, name_r, object_r, object_q)
