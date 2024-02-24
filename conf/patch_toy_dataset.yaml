@@ -1,8 +1,6 @@
 defaults:
   - model: mistral
-dataset:
-  dataset_name: "BooleanOperator"
-  dataset_size: 10
+  - dataset: boolean_operator
 seed: 0
 tokenizers_parallelism: "false"
 cuda_launch_blocking: "1"
