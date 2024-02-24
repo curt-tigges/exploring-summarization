@@ -490,7 +490,11 @@ class BooleanNegatorDataset(TemplaticDataset):
             elif attr_r_idx == attr3_idx:
                 answer = attr3_sign
             else:
-                raise ValueError(f"Unknown attribute {attr_r}")
+                raise ValueError(
+                    f"Query attribute {attr_r} with index {attr_r_idx} "
+                    f"does not match any of the three attributes {attr1}, {attr2}, {attr3}, "
+                    f"with indices {attr1_idx}, {attr2_idx}, {attr3_idx}"
+                )
             answers.append(" Yes" if answer else " No")
         return answers
 
