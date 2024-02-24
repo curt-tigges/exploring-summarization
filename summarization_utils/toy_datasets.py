@@ -418,12 +418,12 @@ class BooleanNegatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        template = (
+        template = wrap_instruction(
             "Question: "
             "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
-            " Answer (Yes/No):"
+            " Answer (Yes/No):",
+            model,
         )
-        template = wrap_instruction(template, model)
         prompt_tuples = [
             (
                 name,
@@ -577,12 +577,12 @@ class BooleanOperatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        template = (
+        template = wrap_instruction(
             "Question: "
             "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
-            " Answer (Yes/No):"
+            " Answer (Yes/No):",
+            model,
         )
-        template = wrap_instruction(template, model)
         prompt_tuples = [
             (
                 name,
@@ -888,9 +888,11 @@ class ToyDeductionTemplate(TemplaticDataset):
         seed: int = 0,
     ) -> None:
         template = (
-            "{NAME} is a {GROUP}. {CAPITAL_GROUP}s are {ATTR}. Therefore, {NAME} is"
+            wrap_instruction(
+                "{NAME} is a {GROUP}. {CAPITAL_GROUP}s are {ATTR}. Conclusion?", model
+            )
+            + " Therefore, {NAME} is"
         )
-        template = wrap_instruction(template, model)
         prompt_tuples = list(
             itertools.product(
                 self.NAMES,
@@ -1000,8 +1002,13 @@ class ToyProfilesTemplate(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        template = "Profile: {NAME} was born in {CITY}. {NAME} works as a {JOB}. {QUERY}: {NAME} {CONJ}"
-        template = wrap_instruction(template, model)
+        template = (
+            wrap_instruction(
+                "Profile: {NAME} was born in {CITY}. {NAME} works as a {JOB}. What is their {QUERY}?",
+                model,
+            )
+            + "{QUERY}: {NAME} {CONJ}"
+        )
         prompt_tuples = list(
             itertools.product(self.NAMES, self.CITIES, self.JOBS, self.QUERIES)
         )
