@@ -8,8 +8,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get update \
     && apt-get install -y gh
 RUN pip install plotly einops protobuf==3.20.* jaxtyping==0.2.13 torchtyping jupyterlab scikit-learn ipywidgets matplotlib kaleido openai
-COPY ./transformer_lens ./transformer_lens
-RUN pip install -e ./transformer_lens
+RUN pip install transformer_lens>=1.14.0
+RUN pip install hydra-core
 RUN pip install typeguard==2.13.3
 COPY CircuitsVis CircuitsVis
 RUN pip install -e ./CircuitsVis/python

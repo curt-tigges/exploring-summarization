@@ -1,0 +1,17 @@
+model:
+  model_name: "mistral-7b-instruct"
+  torch_dtype: "torch.bfloat16"
+  device: "cuda"
+  fold_ln: false
+  center_writing_weights: false
+  center_unembed: false
+dataset:
+  dataset_name: "BooleanOperator"
+  dataset_size: 10
+seed: 0
+tokenizers_parallelism: "false"
+cuda_launch_blocking: "1"
+torch_use_cuda_dsa: "1"
+sep: ","
+prompts: 4
+top_k: 10
