@@ -1261,7 +1261,7 @@ class CounterfactualDataset:
         elif name == "OfCourse" and is_pythia:
             return cls.from_tuples(PYTHIA_OF_COURSE, model)
         elif name == "OfCourse" and is_mistral:
-            return cls.from_tuples(PYTHIA_OF_COURSE, model)
+            return cls.from_tuples(MISTRAL_OF_COURSE, model)
         elif name == "Code" and is_santacoder:
             return cls.from_tuples(SANTACODER_CODE, model)
         elif name == "BooleanNegator":
