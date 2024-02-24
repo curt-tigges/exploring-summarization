@@ -70,7 +70,15 @@ def main(
     all_logit_diffs, cf_logit_diffs = dataset.compute_logit_diffs()
     print(f"Original mean: {all_logit_diffs.mean():.2f}")
     print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
-    assert (all_logit_diffs > 0).all()
+
+    # Check accuracy is 100%
+    assert (all_logit_diffs > 0).all(), (
+        "Negative logit diff for "
+        f"prompt={dataset.prompts[torch.where(all_logit_diffs < 0)[0][0]]}, "
+        f"answer={dataset.answers[torch.where(all_logit_diffs < 0)[0][0]]}, "
+        f"cf_answer={dataset.cf_answers[torch.where(all_logit_diffs < 0)[0][0]]}, "
+        f"logit_diff={all_logit_diffs[torch.where(all_logit_diffs < 0)[0][0]]}"
+    )
     assert (cf_logit_diffs < 0).all()
 
     if not pos_results_file.exists():

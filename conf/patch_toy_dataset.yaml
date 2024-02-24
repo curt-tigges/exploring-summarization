@@ -5,11 +5,11 @@ defaults:
 hydra:
   sweeper:
     params:
-      dataset: boolean_operator, boolean_operator, code, known_for, of_course, toy_binding, toy_deduction, toy_profiles
+      dataset: boolean_negator, boolean_operator, code, known_for, of_course, toy_binding, toy_deduction, toy_profiles
 seed: 0
 tokenizers_parallelism: "false"
 cuda_launch_blocking: "1"
 torch_use_cuda_dsa: "1"
-prompts: 4
+prompts: 2
 top_k: 10
 patch_by_layer: true

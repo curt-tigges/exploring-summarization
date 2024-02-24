@@ -280,6 +280,17 @@ SANTACODER_CODE = [
 ]
 
 
+def wrap_instruction(instruction: str, model: HookedTransformer):
+    if model.cfg.model_name == "mistral-7b-instruct":
+        return f"[INST] {instruction} [/INST]"
+    elif "instruct" in model.cfg.model_name or "chat" in model.cfg.model_name:
+        raise NotImplementedError(
+            f"Model {model.cfg.model_name} does not support instructions"
+        )
+    else:
+        return instruction
+
+
 class TemplaticDataset(ABC):
     def __init__(
         self,
@@ -407,14 +418,12 @@ class BooleanNegatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        assert (
-            "mistral-7b-instruct" in model.cfg.model_name.lower()
-        ), f"Model {model.cfg.model_name} must be a mistral-7b-instruct model"
         template = (
-            "[INST] Question: "
+            "Question: "
             "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
-            " Answer (Yes/No): [/INST]"
+            " Answer (Yes/No):"
         )
+        template = wrap_instruction(template, model)
         prompt_tuples = [
             (
                 name,
@@ -568,14 +577,12 @@ class BooleanOperatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        assert (
-            "mistral-7b-instruct" in model.cfg.model_name.lower()
-        ), f"Model {model.cfg.model_name} must be a mistral-7b-instruct model"
         template = (
-            "[INST] Question: "
+            "Question: "
             "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
-            " Answer (Yes/No): [/INST]"
+            " Answer (Yes/No):"
         )
+        template = wrap_instruction(template, model)
         prompt_tuples = [
             (
                 name,
@@ -773,7 +780,8 @@ class ToyBindingTemplate(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        template = "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. The {OBJECT_Q} belongs to"
+        template = "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. Who does {OBJECT_Q} belong to?"
+        template = wrap_instruction(template, model)
         prompt_tuples = [
             (name_l, object_l, name_r, object_r, object_q)
             for name_l, name_r in itertools.combinations(self.NAMES, 2)
@@ -877,6 +885,7 @@ class ToyDeductionTemplate(TemplaticDataset):
         template = (
             "{NAME} is a {GROUP}. {CAPITAL_GROUP}s are {ATTR}. Therefore, {NAME} is"
         )
+        template = wrap_instruction(template, model)
         prompt_tuples = list(
             itertools.product(
                 self.NAMES,
@@ -987,6 +996,7 @@ class ToyProfilesTemplate(TemplaticDataset):
         seed: int = 0,
     ) -> None:
         template = "Profile: {NAME} was born in {CITY}. {NAME} works as a {JOB}. {QUERY}: {NAME} {CONJ}"
+        template = wrap_instruction(template, model)
         prompt_tuples = list(
             itertools.product(self.NAMES, self.CITIES, self.JOBS, self.QUERIES)
         )
