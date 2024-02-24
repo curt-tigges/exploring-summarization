@@ -281,7 +281,7 @@ SANTACODER_CODE = [
 
 
 def wrap_instruction(instruction: str, model: HookedTransformer):
-    if model.cfg.model_name == "mistral-7b-instruct":
+    if "mistral-7b-instruct" in model.cfg.model_name.lower():
         return f"[INST] {instruction} [/INST]"
     elif "instruct" in model.cfg.model_name or "chat" in model.cfg.model_name:
         raise NotImplementedError(
