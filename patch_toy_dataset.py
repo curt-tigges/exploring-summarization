@@ -31,7 +31,7 @@ def main(
     pos_results_file = ResultsFile(
         name="pos_patch_toy_dataset",
         extension="html",
-        result_type="plot",
+        result_type="plots",
         model_name=model_cfg.model_name,
         dataset_name=dataset_cfg.dataset_name,
         dataset_size=dataset_cfg.dataset_size,
@@ -40,7 +40,7 @@ def main(
     layer_results_file = ResultsFile(
         name="layer_patch_toy_dataset",
         extension="html",
-        result_type="plot",
+        result_type="plots",
         model_name=model_cfg.model_name,
         dataset_name=dataset_cfg.dataset_name,
         dataset_size=dataset_cfg.dataset_size,
@@ -75,7 +75,7 @@ def main(
 
     if not pos_results_file.exists():
         print("Patching by position...")
-        results_pd = patch_by_position_group(dataset, sep=cfg.sep)
+        results_pd = patch_by_position_group(dataset, sep=dataset_cfg.sep)
         bar = px.bar(
             results_pd.mean(axis=0),
             labels={"index": "Position", "value": "Patching metric"},

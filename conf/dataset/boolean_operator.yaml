@@ -1,2 +1,3 @@
 dataset_name: "BooleanOperator"
 dataset_size: 10
+sep: "."

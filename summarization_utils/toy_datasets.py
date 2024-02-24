@@ -446,7 +446,8 @@ class BooleanNegatorDataset(TemplaticDataset):
             # Flip the sign of the one of the three attributes which matches attr_r
             _, attr_r_idx = self.get_attribute_sign_and_index(attr_r)
             idx_to_change, attr_to_change = [
-                (i, attr) for i, attr in enumerate((attr1, attr2, attr3))
+                (i, attr)
+                for i, attr in enumerate((attr1, attr2, attr3))
                 if self.get_attribute_sign_and_index(attr) == attr_r_idx
             ][0]
             attr_idx, attr_sign = self.get_attribute_sign_and_index(attr_to_change)
@@ -667,7 +668,7 @@ class BooleanOperatorDataset(TemplaticDataset):
         else:
             raise ValueError(f"Unknown operator {operator}")
         return answer
-    
+
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         # We try flipping the sign of each of the three attributes until we find one
         # which flips the answer
@@ -704,7 +705,6 @@ class BooleanOperatorDataset(TemplaticDataset):
                 (name, cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r)
             )
         return cf_tuples
-    
 
     @classmethod
     def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
