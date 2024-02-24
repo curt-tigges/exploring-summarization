@@ -28,6 +28,30 @@ def main(
     torch.manual_seed(cfg.seed)
     random.seed(cfg.seed)
 
+    pos_results_file = ResultsFile(
+        name="pos_patch_toy_dataset",
+        extension="html",
+        result_type="plot",
+        model_name=model_cfg.model_name,
+        dataset_name=dataset_cfg.dataset_name,
+        dataset_size=dataset_cfg.dataset_size,
+        seed=cfg.seed,
+    )
+    layer_results_file = ResultsFile(
+        name="layer_patch_toy_dataset",
+        extension="html",
+        result_type="plot",
+        model_name=model_cfg.model_name,
+        dataset_name=dataset_cfg.dataset_name,
+        dataset_size=dataset_cfg.dataset_size,
+        seed=cfg.seed,
+    )
+    if pos_results_file.exists() and layer_results_file.exists():
+        print(
+            f"Results already exist for {pos_results_file.name} and {layer_results_file.name}."
+        )
+        return
+
     model = TokenSafeTransformer.from_pretrained(
         model_cfg.model_name,
         fold_ln=model_cfg.fold_ln,
@@ -48,36 +72,22 @@ def main(
     print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
     assert (all_logit_diffs > 0).all()
     assert (cf_logit_diffs < 0).all()
-    print("Patching by position...")
-    results_pd = patch_by_position_group(dataset, sep=cfg.sep)
-    bar = px.bar(
-        results_pd.mean(axis=0),
-        labels={"index": "Position", "value": "Patching metric"},
-    )
-    bar.update_layout(showlegend=False)
-    pos_results_file = ResultsFile(
-        name="pos_patch_toy_dataset",
-        extension="html",
-        result_type="plot",
-        model_name=model_cfg.model_name,
-        dataset_name=dataset_cfg.dataset_name,
-        dataset_size=dataset_cfg.dataset_size,
-        seed=cfg.seed,
-    )
-    pos_results_file.save(bar)
-    print("Patching by layer...")
-    pos_layer_results = patch_by_layer(dataset)
-    layer_fig = plot_layer_results_per_batch(dataset, pos_layer_results)
-    layer_results_file = ResultsFile(
-        name="layer_patch_toy_dataset",
-        extension="html",
-        result_type="plot",
-        model_name=model_cfg.model_name,
-        dataset_name=dataset_cfg.dataset_name,
-        dataset_size=dataset_cfg.dataset_size,
-        seed=cfg.seed,
-    )
-    layer_results_file.save(layer_fig)
+
+    if not pos_results_file.exists():
+        print("Patching by position...")
+        results_pd = patch_by_position_group(dataset, sep=cfg.sep)
+        bar = px.bar(
+            results_pd.mean(axis=0),
+            labels={"index": "Position", "value": "Patching metric"},
+        )
+        bar.update_layout(showlegend=False)
+        pos_results_file.save(bar)
+
+    if not layer_results_file.exists():
+        print("Patching by layer...")
+        pos_layer_results = patch_by_layer(dataset)
+        layer_fig = plot_layer_results_per_batch(dataset, pos_layer_results)
+        layer_results_file.save(layer_fig)
     print("Done.")
 
 
