@@ -137,7 +137,7 @@ model = TokenSafeTransformer.from_pretrained(
     fold_ln=False, 
     center_writing_weights=False, 
     center_unembed=False, 
-    device="cuda",
+    device=device,
     dtype=torch_dtype,
 )
 assert model.tokenizer is not None
