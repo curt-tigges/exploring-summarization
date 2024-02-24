@@ -459,7 +459,7 @@ class BooleanNegatorDataset(TemplaticDataset):
             idx_to_change, attr_to_change = [
                 (i, attr)
                 for i, attr in enumerate((attr1, attr2, attr3))
-                if self.get_attribute_sign_and_index(attr) == attr_r_idx
+                if self.get_attribute_sign_and_index(attr)[1] == attr_r_idx
             ][0]
             attr_idx, attr_sign = self.get_attribute_sign_and_index(attr_to_change)
             cf_attr = (
