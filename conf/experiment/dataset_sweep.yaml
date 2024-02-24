@@ -2,4 +2,4 @@
 hydra:
   sweeper:
     params:
-      +dataset: [boolean_operator, boolean_operator, code, known_for, of_course, toy_binding, toy_deduction, toy_profiles]
+      +dataset: boolean_operator, boolean_operator, code, known_for, of_course, toy_binding, toy_deduction, toy_profiles

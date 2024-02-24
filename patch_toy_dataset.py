@@ -48,7 +48,7 @@ def main(
     )
     if pos_results_file.exists() and layer_results_file.exists():
         print(
-            f"Results already exist for {pos_results_file.name} and {layer_results_file.name}."
+            f"Results already exist at {pos_results_file.path} and {layer_results_file.path}."
         )
         return
 
