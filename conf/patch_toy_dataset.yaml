@@ -1,10 +1,5 @@
-model:
-  model_name: "mistral-7b-instruct"
-  torch_dtype: "torch.bfloat16"
-  device: "cuda"
-  fold_ln: false
-  center_writing_weights: false
-  center_unembed: false
+defaults:
+  - model: mistral
 dataset:
   dataset_name: "BooleanOperator"
   dataset_size: 10
