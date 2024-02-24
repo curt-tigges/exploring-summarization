@@ -1,6 +1,7 @@
 defaults:
   - model: mistral
   - dataset: boolean_operator
+  - _self_
 seed: 0
 tokenizers_parallelism: "false"
 cuda_launch_blocking: "1"
