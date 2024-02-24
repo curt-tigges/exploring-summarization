@@ -1,7 +1,10 @@
 defaults:
   - model: mistral
-  - dataset: boolean_operator
+  - sweep: datasets
   - _self_
+dataset:
+  dataset_name: "BooleanOperator"  # This will be overridden by the sweep.
+  dataset_size: 10
 seed: 0
 tokenizers_parallelism: "false"
 cuda_launch_blocking: "1"

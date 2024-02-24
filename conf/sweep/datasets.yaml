@@ -1,0 +1,32 @@
+- dataset:
+    dataset_name: "BooleanNegator"
+    dataset_size: 10
+    sep: "."
+- dataset:
+    dataset_name: "BooleanOperator"
+    dataset_size: 10
+    sep: "."
+- dataset:
+    dataset_name: "Code"
+    dataset_size: 10
+    sep: "\n"
+- dataset:
+    dataset_name: "KnownFor"
+    dataset_size: 10
+    sep: ","
+- dataset:
+    dataset_name: "OfCourse"
+    dataset_size: 10
+    sep: ","
+- dataset:
+    dataset_name: "ToyBinding"
+    dataset_size: 10
+    sep: "."
+- dataset:
+    dataset_name: "ToyDeduction"
+    dataset_size: 10
+    sep: "."
+- dataset:
+    dataset_name: "ToyProfiles"
+    dataset_size: 10
+    sep: "."
