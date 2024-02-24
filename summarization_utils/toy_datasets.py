@@ -283,6 +283,8 @@ SANTACODER_CODE = [
 def wrap_instruction(instruction: str, model: HookedTransformer):
     if "mistral-7b-instruct" in model.cfg.model_name.lower():
         return f"[INST] {instruction} [/INST]"
+    elif "qwen" in model.cfg.model_name.lower() and "chat" in model.cfg.model_name:
+        return f"<|im_start|>user\n{instruction}<|im_end|>\n<|im_start|>assistant\n"
     elif "instruct" in model.cfg.model_name or "chat" in model.cfg.model_name:
         raise NotImplementedError(
             f"Model {model.cfg.model_name} does not support instructions"
@@ -785,7 +787,7 @@ class ToyBindingTemplate(TemplaticDataset):
                 "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. Who does the {OBJECT_Q} belong to?",
                 model,
             )
-            + " The {OBJECT_Q} belongs to"
+            + "The {OBJECT_Q} belongs to"
         )
         prompt_tuples = [
             (name_l, object_l, name_r, object_r, object_q)
@@ -891,7 +893,7 @@ class ToyDeductionTemplate(TemplaticDataset):
             wrap_instruction(
                 "{NAME} is a {GROUP}. {CAPITAL_GROUP}s are {ATTR}. Conclusion?", model
             )
-            + " Therefore, {NAME} is"
+            + "Therefore, {NAME} is"
         )
         prompt_tuples = list(
             itertools.product(
