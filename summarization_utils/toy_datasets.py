@@ -773,31 +773,43 @@ class BooleanOperatorDataset(TemplaticDataset):
         return answer
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
-        # We try flipping the sign of each of the three attributes until we find one
+        # We try flipping the sign of subsets of the three attributes until we find one
         # which flips the answer
         random.seed(self.seed)
         cf_tuples = []
         for name, attr1, attr2, attr3, attr_l, operator, attr_r in self.prompt_tuples:
             orig_answer = self.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
-            indices = [0, 1, 2]
-            random.shuffle(indices)
-            cf_attr1 = attr1
-            cf_attr2 = attr2
-            cf_attr3 = attr3
-            for idx_to_change in indices:
-                # Change one of the three attributes
-                cf_attr_sign, cf_attr_idx = self.get_attribute_sign_and_index(
-                    [cf_attr1, cf_attr2, cf_attr3][idx_to_change]
+            attr1_sign, attr1_idx = self.get_attribute_sign_and_index(attr1)
+            attr2_sign, attr2_idx = self.get_attribute_sign_and_index(attr2)
+            attr3_sign, attr3_idx = self.get_attribute_sign_and_index(attr3)
+            opp_attr1 = (
+                self.POSITIVE_ATTRIBUTES[attr1_idx]
+                if not attr1_sign
+                else self.NEGATIVE_ATTRIBUTES[cf_attr_idx]
+            )
+            opp_attr2 = (
+                self.POSITIVE_ATTRIBUTES[attr2_idx]
+                if not attr2_sign
+                else self.NEGATIVE_ATTRIBUTES[cf_attr_idx]
+            )
+            opp_attr3 = (
+                self.POSITIVE_ATTRIBUTES[attr3_idx]
+                if not attr3_sign
+                else self.NEGATIVE_ATTRIBUTES[cf_attr_idx]
+            )
+            # iterate through subsets of [0, 1, 2] with length 1 or 2
+            list_of_indices = list(
+                itertools.chain(
+                    itertools.combinations([0, 1, 2], 1),
+                    itertools.combinations([0, 1, 2], 2),
                 )
-                cf_attr = (
-                    self.POSITIVE_ATTRIBUTES[cf_attr_idx]
-                    if not cf_attr_sign
-                    else self.NEGATIVE_ATTRIBUTES[cf_attr_idx]
-                )
+            )
+            random.shuffle(list_of_indices)
+            for indices in list_of_indices:
                 cf_attr1, cf_attr2, cf_attr3 = (
-                    cf_attr if idx_to_change == 0 else cf_attr1,
-                    cf_attr if idx_to_change == 1 else cf_attr2,
-                    cf_attr if idx_to_change == 2 else cf_attr3,
+                    opp_attr1 if 0 in indices else attr1,
+                    opp_attr2 if 1 in indices else attr2,
+                    opp_attr3 if 2 in indices else attr3,
                 )
                 cf_answer = self.get_answer(
                     cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r
@@ -805,6 +817,7 @@ class BooleanOperatorDataset(TemplaticDataset):
                 if orig_answer != cf_answer:
                     break
             else:
+
                 raise ValueError(
                     f"Could not find a counterfactual for {name} {attr1} {attr2} {attr3} {attr_l} {operator} {attr_r}"
                 )
