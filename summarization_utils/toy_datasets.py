@@ -129,7 +129,7 @@ MISTRAL_KNOWN_FOR = [
     ),
 ]
 
-QWEN_OF_COURSE = PYTHIA_OF_COURSE = [
+PYTHIA_OF_COURSE = [
     (
         "The first to walk on the moon is of course, Neil",
         " Armstrong",
@@ -145,6 +145,40 @@ QWEN_OF_COURSE = PYTHIA_OF_COURSE = [
     (
         "The fastest production car in the world is of course, the",
         " McL",
+        "The best selling car in the world is of course, the",
+        " Ford",
+    ),
+    (
+        "The most popular fruit in the world is of course, the humble",
+        " apple",
+        "The most popular vegetable in the world is of course, the humble",
+        " potato",
+    ),
+    (
+        "The most popular sport in Brazil is of course, the game of",
+        " soccer",
+        "The most popular sport in India is of course, the game of",
+        " cricket",
+    ),
+]
+
+
+QWEN_OF_COURSE = [
+    (
+        "The first to walk on the moon is of course, Neil",
+        " Armstrong",
+        "The star of the movie Jazz Singer is of course, Neil",
+        " Diamond",
+    ),
+    (
+        "The first to cross Antarctica was of course, Sir",
+        " Ernest",
+        "The first to summit Everest was of course, Sir",
+        " Edmund",
+    ),
+    (
+        "The fastest production car in the world is of course, the",
+        " Bug",
         "The best selling car in the world is of course, the",
         " Ford",
     ),
@@ -677,11 +711,13 @@ class BooleanNegatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        template = wrap_instruction(
-            "Question: "
-            "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
-            " Answer (Yes/No):",
-            model,
+        template = (
+            wrap_instruction(
+                "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
+                " Answer Yes or No.",
+                model,
+            )
+            + "The Yes/No answer is '"
         )
         prompt_tuples = [
             (
@@ -752,7 +788,7 @@ class BooleanNegatorDataset(TemplaticDataset):
                     f"does not match any of the three attributes {attr1}, {attr2}, {attr3}, "
                     f"with indices {attr1_idx}, {attr2_idx}, {attr3_idx}"
                 )
-            answers.append(" Yes" if answer else " No")
+            answers.append("Yes" if answer else "No")
         return answers
 
     def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
@@ -843,7 +879,7 @@ class BooleanOperatorDataset(TemplaticDataset):
         template = (
             wrap_instruction(
                 "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
-                "Answer Yes or No.",
+                " Answer Yes or No.",
                 model,
             )
             + "The Yes/No answer is '"
@@ -1286,10 +1322,10 @@ class ToyProfilesTemplate(TemplaticDataset):
     ) -> None:
         template = (
             wrap_instruction(
-                "Profile: {NAME} was born in {CITY}. {NAME} works as a {JOB}. What is their {QUERY}?",
+                "{NAME} was born in {CITY}. {NAME} works as a {JOB}. What is their {QUERY}?",
                 model,
             )
-            + "{QUERY}: {NAME} {CONJ}"
+            + "{NAME} {CONJ}"
         )
         prompt_tuples = list(
             itertools.product(self.NAMES, self.CITIES, self.JOBS, self.QUERIES)
