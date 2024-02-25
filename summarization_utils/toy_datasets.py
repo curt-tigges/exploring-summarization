@@ -677,11 +677,13 @@ class BooleanOperatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
-        template = wrap_instruction(
-            "Question: "
-            "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
-            " Answer (Yes/No):",
-            model,
+        template = (
+            wrap_instruction(
+                "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
+                "Answer Yes or No.",
+                model,
+            )
+            + "The Yes/No answer is '"
         )
         prompt_tuples = [
             (
@@ -837,7 +839,7 @@ class BooleanOperatorDataset(TemplaticDataset):
         answers = []
         for _, attr1, attr2, attr3, attr_l, operator, attr_r in prompt_tuples:
             answer = cls.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
-            answers.append(" Yes" if answer else " No")
+            answers.append("Yes" if answer else "No")
         return answers
 
     def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
