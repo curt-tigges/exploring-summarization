@@ -854,7 +854,6 @@ class ToyBindingTemplate(TemplaticDataset):
     ]
     OBJECTS = [
         "car",
-        "bike",
         "house",
         "boat",
         "plane",
@@ -865,7 +864,6 @@ class ToyBindingTemplate(TemplaticDataset):
         "ball",
         "toy",
         "game",
-        "shirt",
     ]
 
     def __init__(

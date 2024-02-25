@@ -214,9 +214,11 @@ def patch_by_layer(
             model=dataset.model,
             prepend_bos=prepend_bos,
             node_name=node_name,
-            seq_pos=seq_pos[i]
-            if isinstance(seq_pos, list) or isinstance(seq_pos, Tensor)
-            else seq_pos,
+            seq_pos=(
+                seq_pos[i]
+                if isinstance(seq_pos, list) or isinstance(seq_pos, Tensor)
+                else seq_pos
+            ),
             verbose=verbose,
         )
         results_list.append(prompt_results)
@@ -332,6 +334,13 @@ def patch_by_position_group(
     assert (dataset.base_ldiff != dataset.cf_ldiff).all(), (
         f"Base logit diff {dataset.base_ldiff} and cf logit diff {dataset.cf_ldiff} "
         f"must be different"
+    )
+    sep_id = dataset.model.to_single_token(sep)
+    assert torch.where(dataset.prompt_tokens == sep_id) == torch.where(
+        dataset.cf_tokens == sep_id
+    ), (
+        f"Separators in prompt and counterfactual prompt must be at the same positions, "
+        f"got {torch.where(dataset.prompt_tokens == sep_id)} and {torch.where(dataset.cf_tokens == sep_id)}"
     )
     metric = lambda logits: (
         get_logit_diff(
