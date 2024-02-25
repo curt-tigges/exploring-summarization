@@ -371,9 +371,15 @@ MISTRAL_CODE = [
 def wrap_instruction(instruction: str, model: HookedTransformer):
     if "mistral-7b-instruct" in model.cfg.model_name.lower():
         return f"[INST] {instruction} [/INST]"
-    elif "qwen" in model.cfg.model_name.lower() and "chat" in model.cfg.model_name:
+    elif (
+        "qwen" in model.cfg.model_name.lower()
+        and "chat" in model.cfg.model_name.lower()
+    ):
         return f"<|im_start|>user\n{instruction}<|im_end|>\n<|im_start|>assistant\n"
-    elif "instruct" in model.cfg.model_name or "chat" in model.cfg.model_name:
+    elif (
+        "instruct" in model.cfg.model_name.lower()
+        or "chat" in model.cfg.model_name.lower()
+    ):
         raise NotImplementedError(
             f"Model {model.cfg.model_name} does not support instructions"
         )
