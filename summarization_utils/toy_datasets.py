@@ -475,10 +475,10 @@ QWEN_CODE = [
         " break",
     ),
     (
-        "def count_words(string: str) -> int:\n    return len(string.",
-        "split",
-        "def count_lines(string: str) -> int:\n    return len(string.",
-        "splitlines",
+        "def count_words(string: str) -> int:\n    return len(string.split",
+        ")",
+        "def count_lines(string: str) -> int:\n    return len(string.split",
+        "lines",
     ),
     (
         "def reverseorder_string(string: str) -> str:\n    return string",
