@@ -777,24 +777,35 @@ class BooleanOperatorDataset(TemplaticDataset):
         cf_tuples = []
         for name, attr1, attr2, attr3, attr_l, operator, attr_r in self.prompt_tuples:
             orig_answer = self.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
-            indices = [0, 1, 2]
+            indices = [-1, 0, 1, 2]
             random.shuffle(indices)
             for idx_to_change in indices:
-                attr_sign, attr_idx = self.get_attribute_sign_and_index(
-                    [attr1, attr2, attr3][idx_to_change]
-                )
-                cf_attr = (
-                    self.POSITIVE_ATTRIBUTES[attr_idx]
-                    if not attr_sign
-                    else self.NEGATIVE_ATTRIBUTES[attr_idx]
-                )
-                cf_attr1, cf_attr2, cf_attr3 = (
-                    cf_attr if idx_to_change == 0 else attr1,
-                    cf_attr if idx_to_change == 1 else attr2,
-                    cf_attr if idx_to_change == 2 else attr3,
-                )
+                if idx_to_change == -1:
+                    # Change the boolean operator
+                    cf_operator = (
+                        self.OPERATORS[1]
+                        if operator == self.OPERATORS[0]
+                        else self.OPERATORS[0]
+                    )
+                    cf_attr1, cf_attr2, cf_attr3 = attr1, attr2, attr3
+                else:
+                    # Change one of the three attributes
+                    attr_sign, attr_idx = self.get_attribute_sign_and_index(
+                        [attr1, attr2, attr3][idx_to_change]
+                    )
+                    cf_attr = (
+                        self.POSITIVE_ATTRIBUTES[attr_idx]
+                        if not attr_sign
+                        else self.NEGATIVE_ATTRIBUTES[attr_idx]
+                    )
+                    cf_attr1, cf_attr2, cf_attr3 = (
+                        cf_attr if idx_to_change == 0 else attr1,
+                        cf_attr if idx_to_change == 1 else attr2,
+                        cf_attr if idx_to_change == 2 else attr3,
+                    )
+                    cf_operator = operator
                 cf_answer = self.get_answer(
-                    cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r
+                    cf_attr1, cf_attr2, cf_attr3, attr_l, cf_operator, attr_r
                 )
                 if orig_answer != cf_answer:
                     break
