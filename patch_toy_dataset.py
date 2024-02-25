@@ -4,6 +4,7 @@ import random
 import torch
 import os
 import plotly.express as px
+import warnings
 from summarization_utils.store import ResultsFile
 from summarization_utils.toy_datasets import CounterfactualDataset
 from summarization_utils.counterfactual_patching import (
@@ -72,20 +73,24 @@ def main(
     print(f"Counterfactual mean: {cf_logit_diffs.mean():.2f}")
 
     # Check accuracy is 100%
-    assert (all_logit_diffs > 0).all(), (
-        "Negative logit diff for "
-        f"prompt={dataset.prompts[torch.where(all_logit_diffs < 0)[0][0]]}, "
-        f"answer={dataset.answers[torch.where(all_logit_diffs < 0)[0][0]]}, "
-        f"cf_answer={dataset.cf_answers[torch.where(all_logit_diffs < 0)[0][0]]}, "
-        f"logit_diff={all_logit_diffs[torch.where(all_logit_diffs < 0)[0][0]]}"
-    )
-    assert (cf_logit_diffs < 0).all(), (
-        "Positive logit diff for "
-        f"prompt={dataset.cf_prompts[torch.where(cf_logit_diffs > 0)[0][0]]}, "
-        f"answer={dataset.cf_answers[torch.where(cf_logit_diffs > 0)[0][0]]}, "
-        f"cf_answer={dataset.cf_answers[torch.where(cf_logit_diffs > 0)[0][0]]}, "
-        f"logit_diff={cf_logit_diffs[torch.where(cf_logit_diffs > 0)[0][0]]}"
-    )
+    if not (all_logit_diffs > 0).all():
+        warnings.warn(
+            "Terminating run: negative logit diff for "
+            f"prompt={dataset.prompts[torch.where(all_logit_diffs < 0)[0][0]]}, "
+            f"answer={dataset.answers[torch.where(all_logit_diffs < 0)[0][0]]}, "
+            f"cf_answer={dataset.cf_answers[torch.where(all_logit_diffs < 0)[0][0]]}, "
+            f"logit_diff={all_logit_diffs[torch.where(all_logit_diffs < 0)[0][0]]}"
+        )
+        return
+    if not (cf_logit_diffs < 0).all():
+        warnings.warn(
+            "Terminating run: positive logit diff for "
+            f"prompt={dataset.cf_prompts[torch.where(cf_logit_diffs > 0)[0][0]]}, "
+            f"answer={dataset.cf_answers[torch.where(cf_logit_diffs > 0)[0][0]]}, "
+            f"cf_answer={dataset.cf_answers[torch.where(cf_logit_diffs > 0)[0][0]]}, "
+            f"logit_diff={cf_logit_diffs[torch.where(cf_logit_diffs > 0)[0][0]]}"
+        )
+        return
 
     if dataset_cfg.sep is not None and not (
         pos_results_file.exists() and cfg.skip_if_exists
