@@ -280,6 +280,132 @@ SANTACODER_CODE = [
 ]
 
 
+MISTRAL_CODE = [
+    (
+        "x = 0\nprint(x) # prints",
+        " 0",
+        "x = 1\nprint(x) # prints",
+        " 1",
+    ),
+    (
+        "x = 0\n x += 1\nprint(x) # prints",
+        " 1",
+        "x = 1\n x += 1\nprint(x) # prints",
+        " 2",
+    ),
+    (
+        "x = 'Hello World'\nprint(x) # prints '",
+        "Hello",
+        "x = 'Hi Earth'\nprint(x) # prints '",
+        "Hi",
+    ),
+    (
+        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
+        "hello",
+        "x = 'Hi Earth'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
+        "hi",
+    ),
+    (
+        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
+        " HEL",
+        "x = 'Hi Earth'\nprint(x) # Hi Earth\nx = x.upper()\nprint(x) #",
+        " H",
+    ),
+    (
+        "x = 'Hi World'\nprint(x) # Hi World\nx = x.upper()\nprint(x) # HI WORLD\nx = x.lower()\nprint(x) #",
+        " hi",
+        "x = 'Hey Earth'\nprint(x) # Hey Earth\nx = x.upper()\nprint(x) # HEY EARTH\nx = x.lower()\nprint(x) #",
+        " hey",
+    ),
+    (
+        "x = 'Hey World'\nprint(x) # Hey World\nx = x.upper()\nprint(x) # HEY WORLD\nx = x.lower()\nprint(x) # hey world\nx = x + "
+        " + x\nprint(x) # hey world hey world\nx = x.split()[0]\nprint(x) #",
+        " hey",
+        "x = 'Hi Earth'\nprint(x) # Hi Earth\nx = x.upper()\nprint(x) # HI EARTH\nx = x.lower()\nprint(x) # hi earth\nx = x + "
+        " + x\nprint(x) # hi earth hi earth\nx = x.split()[0]\nprint(x) #",
+        " hi",
+    ),
+    (
+        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "0",
+        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "1",
+    ),
+    (
+        "def print_first_n_factorial_inorder(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
+        " *",
+        "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
+        " +",
+    ),
+    (
+        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "3",
+        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "5",
+    ),
+    (
+        "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+        " print",
+        "def print_first_n_primenumbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+        " break",
+    ),
+    (
+        "def count_words(string: str) -> int:\n    return len(string.",
+        "split",
+        "def count_lines(string: str) -> int:\n    return len(string.",
+        "splitlines",
+    ),
+    (
+        "def reverseorder_string(string: str) -> str:\n    return string",
+        "[::-",
+        "def halve_string(string: str) -> str:\n    return string",
+        "[:",
+    ),
+    (
+        "def is_uppercase(string: str) -> bool:\n    return string.is",
+        "upper",
+        "def is_lowercase(string: str) -> bool:\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+        "upper",
+        "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+        "upper",
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+        "lower",
+    ),
+    (
+        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+        " -",
+        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+        " *",
+    ),
+    (
+        "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " n",
+        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " fib",
+    ),
+    (
+        "def find_min(array: List[int]) -> int:\n    return",
+        " min",
+        "def find_max(array: List[int]) -> int:\n    return",
+        " max",
+    ),
+    (
+        "def calculate_mean(array: List[int]) -> float:\n    return",
+        " sum",
+        "def calculate_mode(array: List[int]) -> float:\n    return",
+        " max",
+    ),
+]
+
+
 def wrap_instruction(instruction: str, model: HookedTransformer):
     if "mistral-7b-instruct" in model.cfg.model_name.lower():
         return f"[INST] {instruction} [/INST]"
@@ -1264,6 +1390,8 @@ class CounterfactualDataset:
             return cls.from_tuples(MISTRAL_OF_COURSE, model)
         elif name == "Code" and is_santacoder:
             return cls.from_tuples(SANTACODER_CODE, model)
+        elif name == "Code" and is_mistral:
+            return cls.from_tuples(MISTRAL_CODE, model)
         elif name == "BooleanNegator":
             return BooleanNegatorDataset(model, **kwargs).to_counterfactual()
         elif name == "BooleanOperator":
@@ -1275,7 +1403,7 @@ class CounterfactualDataset:
         elif name == "ToyProfiles":
             return ToyProfilesTemplate(model, **kwargs).to_counterfactual()
         else:
-            raise ValueError(f"Unknown dataset name {name}")
+            raise ValueError(f"Unknown dataset {name} for model {model.cfg.model_name}")
 
     def __iter__(self):
         return iter(zip(self.prompts, self.answers, self.cf_prompts, self.cf_answers))
