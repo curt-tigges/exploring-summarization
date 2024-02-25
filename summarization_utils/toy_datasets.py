@@ -785,17 +785,17 @@ class BooleanOperatorDataset(TemplaticDataset):
             opp_attr1 = (
                 self.POSITIVE_ATTRIBUTES[attr1_idx]
                 if not attr1_sign
-                else self.NEGATIVE_ATTRIBUTES[cf_attr_idx]
+                else self.NEGATIVE_ATTRIBUTES[attr1_idx]
             )
             opp_attr2 = (
                 self.POSITIVE_ATTRIBUTES[attr2_idx]
                 if not attr2_sign
-                else self.NEGATIVE_ATTRIBUTES[cf_attr_idx]
+                else self.NEGATIVE_ATTRIBUTES[attr2_idx]
             )
             opp_attr3 = (
                 self.POSITIVE_ATTRIBUTES[attr3_idx]
                 if not attr3_sign
-                else self.NEGATIVE_ATTRIBUTES[cf_attr_idx]
+                else self.NEGATIVE_ATTRIBUTES[attr3_idx]
             )
             # iterate through subsets of [0, 1, 2] with length 1 or 2
             list_of_indices = list(
