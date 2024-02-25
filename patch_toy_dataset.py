@@ -87,7 +87,9 @@ def main(
         f"logit_diff={cf_logit_diffs[torch.where(cf_logit_diffs > 0)[0][0]]}"
     )
 
-    if not pos_results_file.exists() or not cfg.skip_if_exists:
+    if dataset_cfg.sep is not None and not (
+        pos_results_file.exists() and cfg.skip_if_exists
+    ):
         print("Patching by position...")
         results_pd = patch_by_position_group(dataset, sep=dataset_cfg.sep)
         bar = px.bar(
