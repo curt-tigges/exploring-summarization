@@ -10,7 +10,47 @@ from summarization_utils.patching_metrics import get_logit_diff
 from abc import ABC, abstractmethod
 
 
-QWEN_KNOWN_FOR = PYTHIA_KNOWN_FOR = [
+QWEN_KNOWN_FOR = [
+    (
+        "Known for being the first to walk on the moon, Neil",
+        " Armstrong",
+        "Known for being the star of the movie Jazz Singer, Neil",
+        " Diamond",
+    ),
+    (
+        "Known for being the first to cross Antarctica, Sir",
+        " Ernest",
+        "Known for being the first to summit Everest, Sir",
+        " Edmund",
+    ),
+    (
+        "Known for being the fastest production car in the world, the",
+        " Bug",
+        "Known for being the best selling car in the world, the",
+        " Ford",
+    ),
+    (
+        "Known for being the most popular fruit in the world, the humble",
+        " apple",
+        "Known for being the most popular vegetable in the world, the humble",
+        " potato",
+    ),
+    (
+        "Known for being a wonder of the world located in Australia, the",
+        " Great",
+        "Known for being a wonder of the world located in India, the",
+        " Taj",
+    ),
+    (
+        "Known for being the most popular sport in Brazil, the game of",
+        " soccer",
+        "Known for being the most popular sport in India, the game of",
+        " cricket",
+    ),
+]
+
+
+PYTHIA_KNOWN_FOR = [
     (
         "Known for being the first to walk on the moon, Neil",
         " Armstrong",
