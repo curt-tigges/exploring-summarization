@@ -306,8 +306,8 @@ MISTRAL_CODE = [
         "hi",
     ),
     (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
-        " HEL",
+        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) #",
+        " S",
         "x = 'Hi Earth'\nprint(x) # Hi Earth\nx = x.upper()\nprint(x) #",
         " H",
     ),
