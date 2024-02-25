@@ -336,9 +336,10 @@ def patch_by_position_group(
         f"must be different"
     )
     sep_id = dataset.model.to_single_token(sep)
-    assert torch.where(dataset.prompt_tokens == sep_id) == torch.where(
-        dataset.cf_tokens == sep_id
-    ), (
+    assert (
+        torch.where(dataset.prompt_tokens == sep_id)[-1]
+        == torch.where(dataset.cf_tokens == sep_id)[-1]
+    ).all(), (
         f"Separators in prompt and counterfactual prompt must be at the same positions, "
         f"got {torch.where(dataset.prompt_tokens == sep_id)} and {torch.where(dataset.cf_tokens == sep_id)}"
     )
