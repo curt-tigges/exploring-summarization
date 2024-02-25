@@ -282,16 +282,16 @@ SANTACODER_CODE = [
 
 MISTRAL_CODE = [
     (
-        "x = 0\nprint(x) # prints",
-        " 0",
-        "x = 1\nprint(x) # prints",
-        " 1",
+        "x = 0\nprint(x) # prints ",
+        "0",
+        "x = 1\nprint(x) # prints ",
+        "1",
     ),
     (
-        "x = 0\n x += 1\nprint(x) # prints",
-        " 1",
-        "x = 1\n x += 1\nprint(x) # prints",
-        " 2",
+        "x = 0\n x += 1\nprint(x) # prints ",
+        "1",
+        "x = 1\n x += 1\nprint(x) # prints ",
+        "2",
     ),
     (
         "x = 'Hello World'\nprint(x) # prints '",
