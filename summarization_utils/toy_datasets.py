@@ -10,7 +10,7 @@ from summarization_utils.patching_metrics import get_logit_diff
 from abc import ABC, abstractmethod
 
 
-PYTHIA_KNOWN_FOR = [
+QWEN_KNOWN_FOR = PYTHIA_KNOWN_FOR = [
     (
         "Known for being the first to walk on the moon, Neil",
         " Armstrong",
@@ -89,7 +89,7 @@ MISTRAL_KNOWN_FOR = [
     ),
 ]
 
-PYTHIA_OF_COURSE = [
+QWEN_OF_COURSE = PYTHIA_OF_COURSE = [
     (
         "The first to walk on the moon is of course, Neil",
         " Armstrong",
@@ -363,6 +363,129 @@ MISTRAL_CODE = [
         "def find_min(array: List[int]) -> int:\n    return",
         " min",
         "def find_max(array: List[int]) -> int:\n    return",
+        " max",
+    ),
+]
+
+QWEN_CODE = [
+    (
+        "x = 0\nprint(x) # ",
+        "0",
+        "x = 1\nprint(x) # ",
+        "1",
+    ),
+    (
+        "x = 0\n x += 1\nprint(x) # ",
+        "1",
+        "x = 1\n x += 1\nprint(x) # ",
+        "2",
+    ),
+    (
+        "x = 'Hello World'\nprint(x) #",
+        " Hello",
+        "x = 'Hi Sys'\nprint(x) #",
+        " Hi",
+    ),
+    (
+        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) #",
+        " hello",
+        "x = 'Hi Sys'\nx = x.upper()\nx = x.lower\nprint(x) #",
+        " hi",
+    ),
+    (
+        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
+        " HEL",
+        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) #",
+        " H",
+    ),
+    (
+        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) #",
+        " hello",
+        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) #",
+        " hi",
+    ),
+    (
+        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) # sup world\nx *= 2\nprint(x) # sup worldsup world\nx = x.split()[0]\nprint(x) #",
+        " hello",
+        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) # hi sys\nx *= 2\nprint(x) # hi syshi sys\nx = x.split()[0]\nprint(x) #",
+        " hi",
+    ),
+    (
+        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "0",
+        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "1",
+    ),
+    (
+        "def print_first_n_factorial_numbers(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
+        " *",
+        "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
+        " +",
+    ),
+    (
+        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "3",
+        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "5",
+    ),
+    (
+        "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+        " print",
+        "def print_first_n_prime_numbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+        " break",
+    ),
+    (
+        "def count_words(string: str) -> int:\n    return len(string.",
+        "split",
+        "def count_lines(string: str) -> int:\n    return len(string.",
+        "splitlines",
+    ),
+    (
+        "def reverseorder_string(string: str) -> str:\n    return string",
+        "[::-",
+        "def halve_string(string: str) -> str:\n    return string",
+        "[:",
+    ),
+    (
+        "def is_upper_case(string: str) -> bool:\n    return string.is",
+        "upper",
+        "def is_lower_case(string: str) -> bool:\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_upper_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+        "upper",
+        "def is_lower_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+        "upper",
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+        "lower",
+    ),
+    (
+        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+        " -",
+        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+        " *",
+    ),
+    (
+        "def factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " n",
+        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " fib",
+    ),
+    (
+        "def find_min(array: List[int]) -> int:\n    return",
+        " min",
+        "def find_max(array: List[int]) -> int:\n    return",
+        " max",
+    ),
+    (
+        "def calculate_mean(array: List[int]) -> float:\n    return",
+        " sum",
+        "def calculate_mode(array: List[int]) -> float:\n    return",
         " max",
     ),
 ]
@@ -1364,21 +1487,28 @@ class CounterfactualDataset:
     @classmethod
     def from_name(cls, name: str, model: HookedTransformer, **kwargs):
         assert model.tokenizer is not None
-        is_pythia = "pythia" in model.tokenizer.name_or_path
-        is_mistral = "mistral" in model.tokenizer.name_or_path
-        is_santacoder = "santacoder" in model.tokenizer.name_or_path
+        is_pythia = "pythia" in model.cfg.model_name
+        is_mistral = "mistral" in model.cfg.model_name
+        is_santacoder = "santacoder" in model.cfg.model_name
+        is_qwen = "qwen" in model.cfg.model_name
         if name == "KnownFor" and is_pythia:
             return cls.from_tuples(PYTHIA_KNOWN_FOR, model)
         elif name == "KnownFor" and is_mistral:
             return cls.from_tuples(MISTRAL_KNOWN_FOR, model)
+        elif name == "KnownFor" and is_qwen:
+            return cls.from_tuples(QWEN_KNOWN_FOR, model)
         elif name == "OfCourse" and is_pythia:
             return cls.from_tuples(PYTHIA_OF_COURSE, model)
         elif name == "OfCourse" and is_mistral:
             return cls.from_tuples(MISTRAL_OF_COURSE, model)
+        elif name == "OfCourse" and is_qwen:
+            return cls.from_tuples(QWEN_OF_COURSE, model)
         elif name == "Code" and is_santacoder:
             return cls.from_tuples(SANTACODER_CODE, model)
         elif name == "Code" and is_mistral:
             return cls.from_tuples(MISTRAL_CODE, model)
+        elif name == "Code" and is_qwen:
+            return cls.from_tuples(QWEN_CODE, model)
         elif name == "BooleanNegator":
             return BooleanNegatorDataset(model, **kwargs).to_counterfactual()
         elif name == "BooleanOperator":
