@@ -747,7 +747,8 @@ class BooleanOperatorDataset(TemplaticDataset):
                 answer = attr2_sign and attr3_sign
             else:
                 raise ValueError(
-                    f"Invalid combination of attributes {attr_l} and {attr_r}"
+                    "Invalid combination of attributes: "
+                    f"{attr1}, {attr2}, {attr3}, {attr_l}, {operator}, {attr_r}"
                 )
         elif operator == "or":
             if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
@@ -764,7 +765,8 @@ class BooleanOperatorDataset(TemplaticDataset):
                 answer = attr2_sign or attr3_sign
             else:
                 raise ValueError(
-                    f"Invalid combination of attributes {attr_l} and {attr_r}"
+                    "Invalid combination of attributes: "
+                    f"{attr1}, {attr2}, {attr3}, {attr_l}, {operator}, {attr_r}"
                 )
         else:
             raise ValueError(f"Unknown operator {operator}")
