@@ -1487,10 +1487,10 @@ class CounterfactualDataset:
     @classmethod
     def from_name(cls, name: str, model: HookedTransformer, **kwargs):
         assert model.tokenizer is not None
-        is_pythia = "pythia" in model.cfg.model_name
-        is_mistral = "mistral" in model.cfg.model_name
-        is_santacoder = "santacoder" in model.cfg.model_name
-        is_qwen = "qwen" in model.cfg.model_name
+        is_pythia = "pythia" in model.cfg.model_name.lower()
+        is_mistral = "mistral" in model.cfg.model_name.lower()
+        is_santacoder = "santacoder" in model.cfg.model_name.lower()
+        is_qwen = "qwen" in model.cfg.model_name.lower()
         if name == "KnownFor" and is_pythia:
             return cls.from_tuples(PYTHIA_KNOWN_FOR, model)
         elif name == "KnownFor" and is_mistral:

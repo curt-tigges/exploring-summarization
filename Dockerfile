@@ -33,4 +33,4 @@ RUN pip install dill==0.3.4
 RUN pip install jupyter ipykernel pytest pytest-doctestplus nbval pytest-cov
 RUN pip install git+https://github.com/neelnanda-io/neel-plotly.git
 RUN pip install --upgrade jax jaxlib
-RUN pip install transformer_lens==1.14.0 hydra-core transformers_stream_generator transformers==4.32.0 accelerate tiktoken einops
+RUN pip install transformer_lens==1.14.0 hydra-core transformers_stream_generator accelerate tiktoken
