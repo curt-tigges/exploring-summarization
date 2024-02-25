@@ -318,24 +318,10 @@ MISTRAL_CODE = [
         " hey",
     ),
     (
-        "x = 'Hey World'\nprint(x) # Hey World\nx = x.upper()\nprint(x) # HEY WORLD\nx = x.lower()\nprint(x) # hey world\nx = x + "
-        " + x\nprint(x) # hey world hey world\nx = x.split()[0]\nprint(x) #",
-        " hey",
-        "x = 'Hi Earth'\nprint(x) # Hi Earth\nx = x.upper()\nprint(x) # HI EARTH\nx = x.lower()\nprint(x) # hi earth\nx = x + "
-        " + x\nprint(x) # hi earth hi earth\nx = x.split()[0]\nprint(x) #",
-        " hi",
-    ),
-    (
         "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
         "0",
         "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
         "1",
-    ),
-    (
-        "def print_first_n_factorial_inorder(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
-        " *",
-        "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
-        " +",
     ),
     (
         "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
@@ -344,20 +330,14 @@ MISTRAL_CODE = [
         "5",
     ),
     (
-        "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " print",
-        "def print_first_n_primenumbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " break",
-    ),
-    (
-        "def count_words(string: str) -> int:\n    return len(string.",
-        "split",
-        "def count_lines(string: str) -> int:\n    return len(string.",
-        "splitlines",
+        "def count_words(string: str) -> int:\n    return len(string.split",
+        ")",
+        "def count_lines(string: str) -> int:\n    return len(string.split",
+        "lines",
     ),
     (
         "def reverseorder_string(string: str) -> str:\n    return string",
-        "[::-",
+        "[",
         "def halve_string(string: str) -> str:\n    return string",
         "[:",
     ),
@@ -365,18 +345,6 @@ MISTRAL_CODE = [
         "def is_uppercase(string: str) -> bool:\n    return string.is",
         "upper",
         "def is_lowercase(string: str) -> bool:\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
-        "upper",
-        "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
-        "upper",
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
         "lower",
     ),
     (
@@ -395,12 +363,6 @@ MISTRAL_CODE = [
         "def find_min(array: List[int]) -> int:\n    return",
         " min",
         "def find_max(array: List[int]) -> int:\n    return",
-        " max",
-    ),
-    (
-        "def calculate_mean(array: List[int]) -> float:\n    return",
-        " sum",
-        "def calculate_mode(array: List[int]) -> float:\n    return",
         " max",
     ),
 ]

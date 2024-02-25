@@ -79,7 +79,13 @@ def main(
         f"cf_answer={dataset.cf_answers[torch.where(all_logit_diffs < 0)[0][0]]}, "
         f"logit_diff={all_logit_diffs[torch.where(all_logit_diffs < 0)[0][0]]}"
     )
-    assert (cf_logit_diffs < 0).all()
+    assert (cf_logit_diffs < 0).all(), (
+        "Positive logit diff for "
+        f"prompt={dataset.cf_prompts[torch.where(cf_logit_diffs > 0)[0][0]]}, "
+        f"answer={dataset.cf_answers[torch.where(cf_logit_diffs > 0)[0][0]]}, "
+        f"cf_answer={dataset.cf_answers[torch.where(cf_logit_diffs > 0)[0][0]]}, "
+        f"logit_diff={cf_logit_diffs[torch.where(cf_logit_diffs > 0)[0][0]]}"
+    )
 
     if not pos_results_file.exists() or not cfg.skip_if_exists:
         print("Patching by position...")
