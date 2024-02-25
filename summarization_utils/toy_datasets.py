@@ -785,7 +785,7 @@ class BooleanOperatorDataset(TemplaticDataset):
             for idx_to_change in indices:
                 # Change one of the three attributes
                 attr_sign, attr_idx = self.get_attribute_sign_and_index(
-                    [attr1, attr2, attr3][idx_to_change]
+                    [cf_attr1, cf_attr1, cf_attr1][idx_to_change]
                 )
                 cf_attr = (
                     self.POSITIVE_ATTRIBUTES[attr_idx]
