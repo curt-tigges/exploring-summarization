@@ -37,12 +37,9 @@ def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
     regex_pattern = regex_pattern.replace(r"/", r"\/")
     regex_pattern = regex_pattern.replace(r".", r"\.")
     for placeholder in placeholders:
-        regex_pattern = regex_pattern.replace("{" + placeholder + "}", r"(.*?)")
-
-    # Create a specific pattern for OBJECT_Q by replacing its unique identifier with a more specific regex
-    # Assuming OBJECT_Q is always asked in a specific way in the template
-    for placeholder in placeholders:
-        regex_pattern = regex_pattern.replace(placeholder, r"(\w+)")
+        regex_pattern = regex_pattern.replace(
+            "{" + placeholder + "}", r"(?P<" + placeholder + r">.*?)"
+        )
 
     # Use the generated regex pattern to match the given line and extract the OBJECT_Q
     match = re.search(regex_pattern, prompt, re.IGNORECASE)
