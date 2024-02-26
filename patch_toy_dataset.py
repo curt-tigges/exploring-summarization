@@ -102,7 +102,12 @@ def main(
         bar = px.bar(
             results_pd.mean(axis=0),
             labels={"index": "Position", "value": "Patching metric"},
-            title=f"Patching by position (model={model_cfg.model_name}, dataset={dataset_cfg.dataset_name})",
+            title=(
+                "Patching by position: "
+                f"model={model_cfg.model_name}, "
+                f"dataset={dataset_cfg.dataset_name}, "
+                f"sep={dataset_cfg.sep}"
+            ),
         )
         bar.update_layout(showlegend=False)
         pos_results_file.save(bar)
