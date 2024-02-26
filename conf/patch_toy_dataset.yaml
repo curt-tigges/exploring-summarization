@@ -5,7 +5,7 @@ defaults:
 hydra:
   sweeper:
     params:
-      model: mistral, qwen_1_8b, qwen_7b
+      model: mistral, qwen_7b
       dataset: boolean_negator, boolean_operator, code, known_for, of_course, toy_binding, toy_deduction, toy_profiles
 seed: 0
 tokenizers_parallelism: "false"

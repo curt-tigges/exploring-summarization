@@ -329,6 +329,7 @@ def plot_position_results_per_batch(
 def patch_by_position_group(
     dataset: CounterfactualDataset, sep: str = ",", verbose: bool = True
 ) -> Float[pd.DataFrame, "batch group"]:
+    sep = sep.replace("_", " ")
     if dataset.base_ldiff.shape[0] == 0:
         dataset.compute_logit_diffs(vectorized=True)
     assert (dataset.base_ldiff != dataset.cf_ldiff).all(), (
