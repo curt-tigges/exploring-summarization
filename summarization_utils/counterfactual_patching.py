@@ -31,6 +31,11 @@ def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
 
     # Replace placeholders in the template with regex patterns to match any word(s)
     regex_pattern = template
+    regex_pattern = regex_pattern.replace(r"[", r"\[")
+    regex_pattern = regex_pattern.replace(r"]", r"\]")
+    regex_pattern = regex_pattern.replace(r"?", r"\?")
+    regex_pattern = regex_pattern.replace(r"/", r"\/")
+    regex_pattern = regex_pattern.replace(r".", r"\.")
     for placeholder in placeholders:
         regex_pattern = regex_pattern.replace("{" + placeholder + "}", r"(.*?)")
 
