@@ -1,0 +1,6 @@
+model_name: "mistral-7b-instruct"
+torch_dtype: "bfloat16"
+device: "cuda"
+fold_ln: false
+center_writing_weights: false
+center_unembed: false

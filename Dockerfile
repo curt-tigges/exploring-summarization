@@ -8,8 +8,6 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get update \
     && apt-get install -y gh
 RUN pip install plotly einops protobuf==3.20.* jaxtyping==0.2.13 torchtyping jupyterlab scikit-learn ipywidgets matplotlib kaleido openai
-COPY ./transformer_lens ./transformer_lens
-RUN pip install -e ./transformer_lens
 RUN pip install typeguard==2.13.3
 COPY CircuitsVis CircuitsVis
 RUN pip install -e ./CircuitsVis/python
@@ -35,3 +33,5 @@ RUN pip install dill==0.3.4
 RUN pip install jupyter ipykernel pytest pytest-doctestplus nbval pytest-cov
 RUN pip install git+https://github.com/neelnanda-io/neel-plotly.git
 RUN pip install --upgrade jax jaxlib
+RUN pip install transformer_lens==1.14.0 hydra-core transformers_stream_generator accelerate tiktoken
+RUN apt-get update && apt-get install magic-wormhole

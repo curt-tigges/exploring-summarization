@@ -1,0 +1,6 @@
+model_name: "qwen-1.8b-chat"
+torch_dtype: "float32"
+device: "cuda"
+fold_ln: false
+center_writing_weights: false
+center_unembed: false

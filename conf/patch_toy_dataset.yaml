@@ -1,0 +1,17 @@
+defaults:
+  - model: mistral
+  - dataset: boolean_operator
+  - _self_
+hydra:
+  sweeper:
+    params:
+      model: mistral, qwen_1_8b, qwen_7b
+      dataset: boolean_negator, boolean_operator, code, known_for, of_course, toy_binding, toy_deduction, toy_profiles
+seed: 0
+tokenizers_parallelism: "false"
+cuda_launch_blocking: "1"
+torch_use_cuda_dsa: "1"
+prompts: 2
+top_k: 5
+patch_by_layer: true
+skip_if_exists: true

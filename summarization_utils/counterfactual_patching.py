@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 import torch
 from torch import Tensor
 import einops
-from transformer_lens import HookedTransformer, ActivationCache
+from transformer_lens import HookedTransformer
 from typing import Dict, List, Literal, Union
 from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import act_patch, IterNode, Node
@@ -214,9 +214,11 @@ def patch_by_layer(
             model=dataset.model,
             prepend_bos=prepend_bos,
             node_name=node_name,
-            seq_pos=seq_pos[i]
-            if isinstance(seq_pos, list) or isinstance(seq_pos, Tensor)
-            else seq_pos,
+            seq_pos=(
+                seq_pos[i]
+                if isinstance(seq_pos, list) or isinstance(seq_pos, Tensor)
+                else seq_pos
+            ),
             verbose=verbose,
         )
         results_list.append(prompt_results)
@@ -333,6 +335,14 @@ def patch_by_position_group(
         f"Base logit diff {dataset.base_ldiff} and cf logit diff {dataset.cf_ldiff} "
         f"must be different"
     )
+    sep_id = dataset.model.to_single_token(sep)
+    assert (
+        torch.where(dataset.prompt_tokens == sep_id)[-1]
+        == torch.where(dataset.cf_tokens == sep_id)[-1]
+    ).all(), (
+        f"Separators in prompt and counterfactual prompt must be at the same positions, "
+        f"got {torch.where(dataset.prompt_tokens == sep_id)} and {torch.where(dataset.cf_tokens == sep_id)}"
+    )
     metric = lambda logits: (
         get_logit_diff(
             logits,
@@ -352,7 +362,7 @@ def patch_by_position_group(
         pos_results = act_patch(
             dataset.model, dataset.prompt_tokens, nodes, metric, new_input=dataset.cf_tokens, verbose=verbose  # type: ignore
         )
-        results_dict[pos_label] = pos_results.cpu().numpy()
+        results_dict[pos_label] = pos_results.to(dtype=torch.float32).cpu().numpy()
     return pd.DataFrame(results_dict)
 
 

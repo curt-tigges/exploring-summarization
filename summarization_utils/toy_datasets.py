@@ -1,22 +1,56 @@
 import itertools
 import random
-import einops
 from jaxtyping import Float, Int
-from typing import Dict, List, Optional, Tuple
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from typing import List, Optional, Tuple
 import torch
 from torch import Tensor
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import test_prompt, get_attention_mask
 from summarization_utils.patching_metrics import get_logit_diff
-from summarization_utils.path_patching import Node, IterNode, act_patch
 from abc import ABC, abstractmethod
 
 
-KNOWN_FOR_TUPLES = [
+QWEN_KNOWN_FOR = [
+    (
+        "Known for being the first to walk on the moon, Neil",
+        " Armstrong",
+        "Known for being the star of the movie Jazz Singer, Neil",
+        " Diamond",
+    ),
+    (
+        "Known for being the first to cross Antarctica, Sir",
+        " Ernest",
+        "Known for being the first to summit Everest, Sir",
+        " Edmund",
+    ),
+    (
+        "Known for being the fastest production car in the world, the",
+        " Bug",
+        "Known for being the best selling car in the world, the",
+        " Ford",
+    ),
+    (
+        "Known for being the most popular fruit in the world, the humble",
+        " apple",
+        "Known for being the most popular vegetable in the world, the humble",
+        " potato",
+    ),
+    (
+        "Known for being a wonder of the world located in Australia, the",
+        " Great",
+        "Known for being a wonder of the world located in India, the",
+        " Taj",
+    ),
+    (
+        "Known for being the most popular sport in Brazil, the game of",
+        " soccer",
+        "Known for being the most popular sport in India, the game of",
+        " cricket",
+    ),
+]
+
+
+PYTHIA_KNOWN_FOR = [
     (
         "Known for being the first to walk on the moon, Neil",
         " Armstrong",
@@ -55,7 +89,47 @@ KNOWN_FOR_TUPLES = [
     ),
 ]
 
-OF_COURSE_TUPLES = [
+
+MISTRAL_KNOWN_FOR = [
+    (
+        "Known for being the first to walk on the moon, Neil",
+        " Arm",
+        "Known for being the star of movie Jazz Singer, Neil",
+        " Diamond",
+    ),
+    (
+        "Known as first to cross Antarctica, Sir",
+        " Ernest",
+        "Known for being the first to summit Everest, Sir",
+        " Ed",
+    ),
+    (
+        "Known for being the fastest production car in the world, the",
+        " Mc",
+        "Known for being the best selling car in the world, the",
+        " Ford",
+    ),
+    (
+        "Known for being the most popular fruit in the world, the humble",
+        " apple",
+        "Known for being the most popular crop in the world, the humble",
+        " pot",
+    ),
+    (
+        "Known for being a wonder of the world located in Australia, the",
+        " Great",
+        "Known for being a wonder of the world located in India, the",
+        " T",
+    ),
+    (
+        "Known for being the most popular sport in Brazil, the game of",
+        " soccer",
+        "Known for being the most popular sport in India, the game of",
+        " cricket",
+    ),
+]
+
+PYTHIA_OF_COURSE = [
     (
         "The first to walk on the moon is of course, Neil",
         " Armstrong",
@@ -89,7 +163,74 @@ OF_COURSE_TUPLES = [
 ]
 
 
-CODE_TUPLES = [
+QWEN_OF_COURSE = [
+    (
+        "The first to walk on the moon is of course, Neil",
+        " Armstrong",
+        "The star of the movie Jazz Singer is of course, Neil",
+        " Diamond",
+    ),
+    (
+        "The first to cross Antarctica was of course, Sir",
+        " Ernest",
+        "The first to summit Everest was of course, Sir",
+        " Edmund",
+    ),
+    (
+        "The fastest production car in the world is of course, the",
+        " Bug",
+        "The best selling car in the world is of course, the",
+        " Ford",
+    ),
+    (
+        "The most popular fruit in the world is of course, the humble",
+        " apple",
+        "The most popular vegetable in the world is of course, the humble",
+        " potato",
+    ),
+    (
+        "The most popular sport in Brazil is of course, the game of",
+        " soccer",
+        "The most popular sport in India is of course, the game of",
+        " cricket",
+    ),
+]
+
+
+MISTRAL_OF_COURSE = [
+    (
+        "The first to walk on the moon is of course, Neil",
+        " Arm",
+        "The star of movie Jazz Singer is of course, Neil",
+        " Diamond",
+    ),
+    (
+        "First across Antarctica was of course, Sir",
+        " Ernest",
+        "The first to summit Everest was of course, Sir",
+        " Ed",
+    ),
+    (
+        "The fastest production car in the world is of course, the",
+        " Mc",
+        "The best selling car in the world is of course, the",
+        " Ford",
+    ),
+    (
+        "The most popular fruit in the world is of course, the humble",
+        " apple",
+        "The most popular crop in the world is of course, the humble",
+        " pot",
+    ),
+    (
+        "The most popular sport in Brazil is of course, the game of",
+        " soccer",
+        "The most popular sport in India is of course, the game of",
+        " cricket",
+    ),
+]
+
+SANTACODER_CODE = [
     (
         "x = 0\nprint(x) # ",
         "0",
@@ -213,6 +354,236 @@ CODE_TUPLES = [
 ]
 
 
+MISTRAL_CODE = [
+    (
+        "x = 0\nprint(x) # prints ",
+        "0",
+        "x = 1\nprint(x) # prints ",
+        "1",
+    ),
+    (
+        "x = 0\n x += 1\nprint(x) # prints ",
+        "1",
+        "x = 1\n x += 1\nprint(x) # prints ",
+        "2",
+    ),
+    (
+        "x = 'Hello World'\nprint(x) # prints '",
+        "Hello",
+        "x = 'Hi Earth'\nprint(x) # prints '",
+        "Hi",
+    ),
+    (
+        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
+        "hello",
+        "x = 'Hi Earth'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
+        "hi",
+    ),
+    (
+        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) #",
+        " S",
+        "x = 'Hi Earth'\nprint(x) # Hi Earth\nx = x.upper()\nprint(x) #",
+        " H",
+    ),
+    (
+        "x = 'Hi World'\nprint(x) # Hi World\nx = x.upper()\nprint(x) # HI WORLD\nx = x.lower()\nprint(x) #",
+        " hi",
+        "x = 'Hey Earth'\nprint(x) # Hey Earth\nx = x.upper()\nprint(x) # HEY EARTH\nx = x.lower()\nprint(x) #",
+        " hey",
+    ),
+    (
+        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "0",
+        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "1",
+    ),
+    (
+        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "3",
+        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "5",
+    ),
+    (
+        "def count_words(string: str) -> int:\n    return len(string.split",
+        ")",
+        "def count_lines(string: str) -> int:\n    return len(string.split",
+        "lines",
+    ),
+    (
+        "def reverseorder_string(string: str) -> str:\n    return string",
+        "[",
+        "def halve_string(string: str) -> str:\n    return string",
+        "[:",
+    ),
+    (
+        "def is_uppercase(string: str) -> bool:\n    return string.is",
+        "upper",
+        "def is_lowercase(string: str) -> bool:\n    return string.is",
+        "lower",
+    ),
+    (
+        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+        " -",
+        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+        " *",
+    ),
+    (
+        "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " n",
+        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " fib",
+    ),
+    (
+        "def find_min(array: List[int]) -> int:\n    return",
+        " min",
+        "def find_max(array: List[int]) -> int:\n    return",
+        " max",
+    ),
+]
+
+QWEN_CODE = [
+    (
+        "x = 0\nprint(x) # ",
+        "0",
+        "x = 1\nprint(x) # ",
+        "1",
+    ),
+    (
+        "x = 0\n x += 1\nprint(x) # ",
+        "1",
+        "x = 1\n x += 1\nprint(x) # ",
+        "2",
+    ),
+    (
+        "x = 'Hello World'\nprint(x) #",
+        " Hello",
+        "x = 'Hi Sys'\nprint(x) #",
+        " Hi",
+    ),
+    (
+        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) #",
+        " hello",
+        "x = 'Hi Sys'\nx = x.upper()\nx = x.lower\nprint(x) #",
+        " hi",
+    ),
+    (
+        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
+        " HEL",
+        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) #",
+        " H",
+    ),
+    (
+        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) #",
+        " hello",
+        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) #",
+        " hi",
+    ),
+    (
+        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) # sup world\nx *= 2\nprint(x) # sup worldsup world\nx = x.split()[0]\nprint(x) #",
+        " hello",
+        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) # hi sys\nx *= 2\nprint(x) # hi syshi sys\nx = x.split()[0]\nprint(x) #",
+        " hi",
+    ),
+    (
+        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "0",
+        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+        "1",
+    ),
+    (
+        "def print_first_n_factorial_numbers(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
+        " *",
+        "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
+        " +",
+    ),
+    (
+        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "3",
+        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+        "5",
+    ),
+    (
+        "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+        " print",
+        "def print_first_n_prime_numbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+        " break",
+    ),
+    (
+        "def count_words(string: str) -> int:\n    return len(string.split",
+        ")",
+        "def count_lines(string: str) -> int:\n    return len(string.split",
+        "lines",
+    ),
+    (
+        "def reverseorder_string(string: str) -> str:\n    return string",
+        "[::-",
+        "def halve_string(string: str) -> str:\n    return string",
+        "[:",
+    ),
+    (
+        "def is_upper_case(string: str) -> bool:\n    return string.is",
+        "upper",
+        "def is_lower_case(string: str) -> bool:\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_upper_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+        "upper",
+        "def is_lower_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+        "lower",
+    ),
+    (
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+        "upper",
+        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+        "lower",
+    ),
+    (
+        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+        " -",
+        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+        " *",
+    ),
+    (
+        "def factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " n",
+        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+        " fib",
+    ),
+    (
+        "def find_min(array: List[int]) -> int:\n    return",
+        " min",
+        "def find_max(array: List[int]) -> int:\n    return",
+        " max",
+    ),
+    (
+        "def calculate_mean(array: List[int]) -> float:\n    return",
+        " sum",
+        "def calculate_mode(array: List[int]) -> float:\n    return",
+        " max",
+    ),
+]
+
+
+def wrap_instruction(instruction: str, model: HookedTransformer):
+    if "mistral-7b-instruct" in model.cfg.model_name.lower():
+        return f"[INST] {instruction} [/INST]"
+    elif (
+        "qwen" in model.cfg.model_name.lower()
+        and "chat" in model.cfg.model_name.lower()
+    ):
+        return f"<|im_start|>user\n{instruction}<|im_end|>\n<|im_start|>assistant\n"
+    elif (
+        "instruct" in model.cfg.model_name.lower()
+        or "chat" in model.cfg.model_name.lower()
+    ):
+        raise NotImplementedError(
+            f"Model {model.cfg.model_name} does not support instructions"
+        )
+    else:
+        return instruction
+
+
 class TemplaticDataset(ABC):
     def __init__(
         self,
@@ -222,13 +593,12 @@ class TemplaticDataset(ABC):
         dataset_size: Optional[int] = None,
     ) -> None:
         self.template = template
-        self.prompt_tuples = prompt_tuples
+        self.prompt_tuples = prompt_tuples[:dataset_size]
         self._cf_tuples = []
         self.model = model
-        self.dataset_size = dataset_size
 
     @abstractmethod
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         pass
 
     @classmethod
@@ -242,7 +612,7 @@ class TemplaticDataset(ABC):
         pass
 
     @property
-    def cf_tuples(self) -> List[Tuple[str]]:
+    def cf_tuples(self) -> List[Tuple[str, ...]]:
         if not self._cf_tuples:
             self._cf_tuples = self.get_counterfactual_tuples()
         return self._cf_tuples
@@ -264,15 +634,6 @@ class TemplaticDataset(ABC):
         return self.get_answers(self.cf_tuples)
 
     def to_counterfactual(self):
-        prompts = self.prompts
-        answers = self.answers
-        cf_prompts = self.cf_prompts
-        cf_answers = self.cf_answers
-        if self.dataset_size is not None:
-            prompts = prompts[: self.dataset_size]
-            answers = answers[: self.dataset_size]
-            cf_prompts = cf_prompts[: self.dataset_size]
-            cf_answers = cf_answers[: self.dataset_size]
         return CounterfactualDataset(
             prompts=self.prompts,
             answers=self.answers,
@@ -348,16 +709,15 @@ class BooleanNegatorDataset(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
-        assert (
-            "mistral-7b-instruct" in model.cfg.model_name.lower()
-        ), f"Model {model.cfg.model_name} must be a mistral-7b-instruct model"
         template = (
-            "[INST] Question: "
-            "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
-            " Answer (Yes/No): [/INST]"
+            wrap_instruction(
+                "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
+                " Answer Yes or No.",
+                model,
+            )
+            + "The Yes/No answer is '"
         )
         prompt_tuples = [
             (
@@ -379,18 +739,22 @@ class BooleanNegatorDataset(TemplaticDataset):
                 self.POSITIVE_ATTRIBUTES[attr2_idx],
                 self.POSITIVE_ATTRIBUTES[attr3_idx],
             ]
-        ][:max]
+        ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         random.seed(self.seed)
         cf_tuples = []
         for name, attr1, attr2, attr3, attr_r in self.prompt_tuples:
-            idx_to_change = random.choice([0, 1, 2])
-            attr_sign, attr_idx = self.get_attribute_sign_and_index(
-                [attr1, attr2, attr3][idx_to_change]
-            )
+            # Flip the sign of the one of the three attributes which matches attr_r
+            _, attr_r_idx = self.get_attribute_sign_and_index(attr_r)
+            idx_to_change, attr_to_change = [
+                (i, attr)
+                for i, attr in enumerate((attr1, attr2, attr3))
+                if self.get_attribute_sign_and_index(attr)[1] == attr_r_idx
+            ][0]
+            attr_sign, attr_idx = self.get_attribute_sign_and_index(attr_to_change)
             cf_attr = (
                 self.POSITIVE_ATTRIBUTES[attr_idx]
                 if not attr_sign
@@ -419,7 +783,11 @@ class BooleanNegatorDataset(TemplaticDataset):
             elif attr_r_idx == attr3_idx:
                 answer = attr3_sign
             else:
-                raise ValueError(f"Unknown attribute {attr_r}")
+                raise ValueError(
+                    f"Query attribute {attr_r} with index {attr_r_idx} "
+                    f"does not match any of the three attributes {attr1}, {attr2}, {attr3}, "
+                    f"with indices {attr1_idx}, {attr2_idx}, {attr3_idx}"
+                )
             answers.append("Yes" if answer else "No")
         return answers
 
@@ -506,16 +874,15 @@ class BooleanOperatorDataset(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
-        assert (
-            "mistral-7b-instruct" in model.cfg.model_name.lower()
-        ), f"Model {model.cfg.model_name} must be a mistral-7b-instruct model"
         template = (
-            "[INST] Question: "
-            "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
-            " Answer (Yes/No): [/INST]"
+            wrap_instruction(
+                "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
+                " Answer Yes or No.",
+                model,
+            )
+            + "The Yes/No answer is '"
         )
         prompt_tuples = [
             (
@@ -561,28 +928,106 @@ class BooleanOperatorDataset(TemplaticDataset):
                     self.POSITIVE_ATTRIBUTES[attr2_idx],
                 ),
             ]
-        ][:max]
+        ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    @classmethod
+    def get_answer(cls, attr1, attr2, attr3, attr_l, operator, attr_r) -> bool:
+        attr1_sign, attr1_idx = cls.get_attribute_sign_and_index(attr1)
+        attr2_sign, attr2_idx = cls.get_attribute_sign_and_index(attr2)
+        attr3_sign, attr3_idx = cls.get_attribute_sign_and_index(attr3)
+        _, attr_l_idx = cls.get_attribute_sign_and_index(attr_l)
+        _, attr_r_idx = cls.get_attribute_sign_and_index(attr_r)
+        if operator == "and":
+            if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
+                answer = attr1_sign and attr2_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign and attr2_sign
+            elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
+                answer = attr1_sign and attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign and attr3_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
+                answer = attr2_sign and attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
+                answer = attr2_sign and attr3_sign
+            else:
+                raise ValueError(
+                    "Invalid combination of attributes: "
+                    f"{attr1}, {attr2}, {attr3}, {attr_l}, {operator}, {attr_r}"
+                )
+        elif operator == "or":
+            if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
+                answer = attr1_sign or attr2_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign or attr2_sign
+            elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
+                answer = attr1_sign or attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
+                answer = attr1_sign or attr3_sign
+            elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
+                answer = attr2_sign or attr3_sign
+            elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
+                answer = attr2_sign or attr3_sign
+            else:
+                raise ValueError(
+                    "Invalid combination of attributes: "
+                    f"{attr1}, {attr2}, {attr3}, {attr_l}, {operator}, {attr_r}"
+                )
+        else:
+            raise ValueError(f"Unknown operator {operator}")
+        return answer
+
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
+        # We try flipping the sign of subsets of the three attributes until we find one
+        # which flips the answer
         random.seed(self.seed)
         cf_tuples = []
         for name, attr1, attr2, attr3, attr_l, operator, attr_r in self.prompt_tuples:
-            idx_to_change = random.choice([0, 1, 2])
-            attr_sign, attr_idx = self.get_attribute_sign_and_index(
-                [attr1, attr2, attr3][idx_to_change]
+            orig_answer = self.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
+            attr1_sign, attr1_idx = self.get_attribute_sign_and_index(attr1)
+            attr2_sign, attr2_idx = self.get_attribute_sign_and_index(attr2)
+            attr3_sign, attr3_idx = self.get_attribute_sign_and_index(attr3)
+            opp_attr1 = (
+                self.POSITIVE_ATTRIBUTES[attr1_idx]
+                if not attr1_sign
+                else self.NEGATIVE_ATTRIBUTES[attr1_idx]
             )
-            cf_attr = (
-                self.POSITIVE_ATTRIBUTES[attr_idx]
-                if not attr_sign
-                else self.NEGATIVE_ATTRIBUTES[attr_idx]
+            opp_attr2 = (
+                self.POSITIVE_ATTRIBUTES[attr2_idx]
+                if not attr2_sign
+                else self.NEGATIVE_ATTRIBUTES[attr2_idx]
             )
-            cf_attr1, cf_attr2, cf_attr3 = (
-                cf_attr if idx_to_change == 0 else attr1,
-                cf_attr if idx_to_change == 1 else attr2,
-                cf_attr if idx_to_change == 2 else attr3,
+            opp_attr3 = (
+                self.POSITIVE_ATTRIBUTES[attr3_idx]
+                if not attr3_sign
+                else self.NEGATIVE_ATTRIBUTES[attr3_idx]
             )
+            # iterate through subsets of [0, 1, 2] with length 1 or 2
+            list_of_indices = list(
+                itertools.chain(
+                    itertools.combinations([0, 1, 2], 1),
+                    itertools.combinations([0, 1, 2], 2),
+                )
+            )
+            random.shuffle(list_of_indices)
+            for indices in list_of_indices:
+                cf_attr1, cf_attr2, cf_attr3 = (
+                    opp_attr1 if 0 in indices else attr1,
+                    opp_attr2 if 1 in indices else attr2,
+                    opp_attr3 if 2 in indices else attr3,
+                )
+                cf_answer = self.get_answer(
+                    cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r
+                )
+                if orig_answer != cf_answer:
+                    break
+            else:
+
+                raise ValueError(
+                    f"Could not find a counterfactual for {name} {attr1} {attr2} {attr3} {attr_l} {operator} {attr_r}"
+                )
             cf_tuples.append(
                 (name, cf_attr1, cf_attr2, cf_attr3, attr_l, operator, attr_r)
             )
@@ -592,47 +1037,7 @@ class BooleanOperatorDataset(TemplaticDataset):
     def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
         answers = []
         for _, attr1, attr2, attr3, attr_l, operator, attr_r in prompt_tuples:
-            attr1_sign, attr1_idx = cls.get_attribute_sign_and_index(attr1)
-            attr2_sign, attr2_idx = cls.get_attribute_sign_and_index(attr2)
-            attr3_sign, attr3_idx = cls.get_attribute_sign_and_index(attr3)
-            _, attr_l_idx = cls.get_attribute_sign_and_index(attr_l)
-            _, attr_r_idx = cls.get_attribute_sign_and_index(attr_r)
-            if operator == "and":
-                if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
-                    answer = attr1_sign and attr2_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign and attr2_sign
-                elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
-                    answer = attr1_sign and attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign and attr3_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
-                    answer = attr2_sign and attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
-                    answer = attr2_sign and attr3_sign
-                else:
-                    raise ValueError(
-                        f"Invalid combination of attributes {attr_l} and {attr_r}"
-                    )
-            elif operator == "or":
-                if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
-                    answer = attr1_sign or attr2_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign or attr2_sign
-                elif attr_l_idx == attr1_idx and attr_r_idx == attr3_idx:
-                    answer = attr1_sign or attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr1_idx:
-                    answer = attr1_sign or attr3_sign
-                elif attr_l_idx == attr2_idx and attr_r_idx == attr3_idx:
-                    answer = attr2_sign or attr3_sign
-                elif attr_l_idx == attr3_idx and attr_r_idx == attr2_idx:
-                    answer = attr2_sign or attr3_sign
-                else:
-                    raise ValueError(
-                        f"Invalid combination of attributes {attr_l} and {attr_r}"
-                    )
-            else:
-                raise ValueError(f"Unknown operator {operator}")
+            answer = cls.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
             answers.append("Yes" if answer else "No")
         return answers
 
@@ -675,7 +1080,6 @@ class ToyBindingTemplate(TemplaticDataset):
     ]
     OBJECTS = [
         "car",
-        "bike",
         "house",
         "boat",
         "plane",
@@ -686,55 +1090,36 @@ class ToyBindingTemplate(TemplaticDataset):
         "ball",
         "toy",
         "game",
-        "shirt",
     ]
 
     def __init__(
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
-        template = "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. The {OBJECT_Q} belongs to"
+        template = (
+            wrap_instruction(
+                "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. Who does the {OBJECT_Q} belong to?",
+                model,
+            )
+            + "The {OBJECT_Q} belongs to"
+        )
         prompt_tuples = [
             (name_l, object_l, name_r, object_r, object_q)
             for name_l, name_r in itertools.combinations(self.NAMES, 2)
             for object_l, object_r in itertools.combinations(self.OBJECTS, 2)
             for object_q in (object_l, object_r)
-        ][:max]
+        ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
-        random.seed(self.seed)
-        cf_tuples = []
-        for idx, (name_l, object_l, name_r, object_r, object_q) in enumerate(
-            self.prompt_tuples
-        ):
-            if idx % 2 == 0:
-                # patch object_l
-                new_object_l = random.choice(
-                    [
-                        object
-                        for object in self.OBJECTS
-                        if object not in [object_l, object_r]
-                    ]
-                )
-                new_object_q = object_q if object_q != object_l else new_object_l
-                cf_tuples.append((name_l, new_object_l, name_r, object_r, new_object_q))
-            else:
-                # patch object_r
-                new_object_r = random.choice(
-                    [
-                        object
-                        for object in self.OBJECTS
-                        if object not in [object_l, object_r]
-                    ]
-                )
-                new_object_q = object_q if object_q != object_r else new_object_r
-                cf_tuples.append((name_l, object_l, name_r, new_object_r, new_object_q))
-        return cf_tuples
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
+        # Just swap the left and right objects
+        return [
+            (name_l, object_r, name_r, object_l, object_q)
+            for name_l, object_l, name_r, object_r, object_q in self.prompt_tuples
+        ]
 
     @classmethod
     def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]):
@@ -818,11 +1203,13 @@ class ToyDeductionTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
         template = (
-            "{NAME} is a {GROUP}. {CAPITAL_GROUP}s are {ATTR}. Therefore, {NAME} is"
+            wrap_instruction(
+                "{NAME} is a {GROUP}. {CAPITAL_GROUP}s are {ATTR}. Conclusion?", model
+            )
+            + "Therefore, {NAME} is"
         )
         prompt_tuples = list(
             itertools.product(
@@ -833,11 +1220,10 @@ class ToyDeductionTemplate(TemplaticDataset):
         )
         random.seed(seed)
         random.shuffle(prompt_tuples)
-        prompt_tuples = prompt_tuples[:max]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         random.seed(self.seed)
         cf_tuples = []
         for name, group, attr in self.prompt_tuples:
@@ -932,20 +1318,24 @@ class ToyProfilesTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        max: int = 1000,
         seed: int = 0,
     ) -> None:
-        template = "Profile: {NAME} was born in {CITY}. {NAME} works as a {JOB}. {QUERY}: {NAME} {CONJ}"
+        template = (
+            wrap_instruction(
+                "{NAME} was born in {CITY}. {NAME} works as a {JOB}. What is their {QUERY}?",
+                model,
+            )
+            + "{NAME} {CONJ}"
+        )
         prompt_tuples = list(
             itertools.product(self.NAMES, self.CITIES, self.JOBS, self.QUERIES)
         )
         random.seed(seed)
         random.shuffle(prompt_tuples)
-        prompt_tuples = prompt_tuples[:max]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    def get_counterfactual_tuples(self) -> List[Tuple[str]]:
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         cf_tuples = []
         for _, (name, city, job, query) in enumerate(self.prompt_tuples):
             if query == "Nationality":
@@ -1171,25 +1561,42 @@ class CounterfactualDataset:
         )
 
     @classmethod
-    def from_name(cls, name: str, model: HookedTransformer):
-        if name == "KnownFor":
-            return cls.from_tuples(KNOWN_FOR_TUPLES, model)
-        elif name == "OfCourse":
-            return cls.from_tuples(OF_COURSE_TUPLES, model)
-        elif name == "Code":
-            return cls.from_tuples(CODE_TUPLES, model)
+    def from_name(cls, name: str, model: HookedTransformer, **kwargs):
+        assert model.tokenizer is not None
+        is_pythia = "pythia" in model.cfg.model_name.lower()
+        is_mistral = "mistral" in model.cfg.model_name.lower()
+        is_santacoder = "santacoder" in model.cfg.model_name.lower()
+        is_qwen = "qwen" in model.cfg.model_name.lower()
+        if name == "KnownFor" and is_pythia:
+            return cls.from_tuples(PYTHIA_KNOWN_FOR, model)
+        elif name == "KnownFor" and is_mistral:
+            return cls.from_tuples(MISTRAL_KNOWN_FOR, model)
+        elif name == "KnownFor" and is_qwen:
+            return cls.from_tuples(QWEN_KNOWN_FOR, model)
+        elif name == "OfCourse" and is_pythia:
+            return cls.from_tuples(PYTHIA_OF_COURSE, model)
+        elif name == "OfCourse" and is_mistral:
+            return cls.from_tuples(MISTRAL_OF_COURSE, model)
+        elif name == "OfCourse" and is_qwen:
+            return cls.from_tuples(QWEN_OF_COURSE, model)
+        elif name == "Code" and is_santacoder:
+            return cls.from_tuples(SANTACODER_CODE, model)
+        elif name == "Code" and is_mistral:
+            return cls.from_tuples(MISTRAL_CODE, model)
+        elif name == "Code" and is_qwen:
+            return cls.from_tuples(QWEN_CODE, model)
         elif name == "BooleanNegator":
-            return BooleanNegatorDataset(model).to_counterfactual()
+            return BooleanNegatorDataset(model, **kwargs).to_counterfactual()
         elif name == "BooleanOperator":
-            return BooleanOperatorDataset(model).to_counterfactual()
+            return BooleanOperatorDataset(model, **kwargs).to_counterfactual()
         elif name == "ToyBinding":
-            return ToyBindingTemplate(model).to_counterfactual()
+            return ToyBindingTemplate(model, **kwargs).to_counterfactual()
         elif name == "ToyDeduction":
-            return ToyDeductionTemplate(model).to_counterfactual()
+            return ToyDeductionTemplate(model, **kwargs).to_counterfactual()
         elif name == "ToyProfiles":
-            return ToyProfilesTemplate(model).to_counterfactual()
+            return ToyProfilesTemplate(model, **kwargs).to_counterfactual()
         else:
-            raise ValueError(f"Unknown dataset name {name}")
+            raise ValueError(f"Unknown dataset {name} for model {model.cfg.model_name}")
 
     def __iter__(self):
         return iter(zip(self.prompts, self.answers, self.cf_prompts, self.cf_answers))
