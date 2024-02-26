@@ -330,13 +330,14 @@ def patch_by_position_group(
     dataset: CounterfactualDataset, sep: str = ",", verbose: bool = True
 ) -> Float[pd.DataFrame, "batch group"]:
     sep = sep.replace("_", " ")
+    sep_id = dataset.model.to_single_token(sep)
+    has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)
     if dataset.base_ldiff.shape[0] == 0:
         dataset.compute_logit_diffs(vectorized=True)
     assert (dataset.base_ldiff != dataset.cf_ldiff).all(), (
         f"Base logit diff {dataset.base_ldiff} and cf logit diff {dataset.cf_ldiff} "
         f"must be different"
     )
-    sep_id = dataset.model.to_single_token(sep)
     assert (
         torch.where(dataset.prompt_tokens == sep_id)[-1]
         == torch.where(dataset.cf_tokens == sep_id)[-1]
@@ -347,13 +348,12 @@ def patch_by_position_group(
     metric = lambda logits: (
         get_logit_diff(
             logits,
-            answer_tokens=dataset.answer_tokens,
-            mask=dataset.mask,
+            answer_tokens=dataset.answer_tokens[has_sep_mask],
+            mask=dataset.mask[has_sep_mask],
             per_prompt=True,
         )
-        - dataset.base_ldiff
-    ) / (dataset.cf_ldiff - dataset.base_ldiff)
-    has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)
+        - dataset.base_ldiff[has_sep_mask]
+    ) / (dataset.cf_ldiff[has_sep_mask] - dataset.base_ldiff[has_sep_mask])
     pos_dict = get_position_dict(
         dataset.prompt_tokens[has_sep_mask], model=dataset.model, sep=sep
     )
