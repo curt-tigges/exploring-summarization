@@ -36,6 +36,7 @@ def main(
         model_name=model_cfg.model_name,
         dataset_name=dataset_cfg.dataset_name,
         dataset_size=dataset_cfg.dataset_size,
+        sep=dataset_cfg.sep,
         seed=cfg.seed,
     )
     layer_results_file = ResultsFile(
@@ -45,6 +46,7 @@ def main(
         model_name=model_cfg.model_name,
         dataset_name=dataset_cfg.dataset_name,
         dataset_size=dataset_cfg.dataset_size,
+        sep=dataset_cfg.sep,
         seed=cfg.seed,
     )
     if cfg.skip_if_exists and pos_results_file.exists() and layer_results_file.exists():
