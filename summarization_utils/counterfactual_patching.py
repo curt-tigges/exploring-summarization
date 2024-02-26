@@ -353,7 +353,10 @@ def patch_by_position_group(
         )
         - dataset.base_ldiff
     ) / (dataset.cf_ldiff - dataset.base_ldiff)
-    pos_dict = get_position_dict(dataset.prompt_tokens, model=dataset.model, sep=sep)
+    has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)
+    pos_dict = get_position_dict(
+        dataset.prompt_tokens[has_sep_mask], model=dataset.model, sep=sep
+    )
     results_dict = dict()
     for pos_label, positions in pos_dict.items():
         nodes = [
@@ -361,7 +364,7 @@ def patch_by_position_group(
             for layer in range(dataset.model.cfg.n_layers)
         ]
         pos_results = act_patch(
-            dataset.model, dataset.prompt_tokens, nodes, metric, new_input=dataset.cf_tokens, verbose=verbose  # type: ignore
+            dataset.model, dataset.prompt_tokens[has_sep_mask], nodes, metric, new_input=dataset.cf_tokens[has_sep_mask], verbose=verbose  # type: ignore
         )
         results_dict[pos_label] = pos_results.to(dtype=torch.float32).cpu().numpy()
     return pd.DataFrame(results_dict)
