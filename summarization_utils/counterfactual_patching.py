@@ -369,8 +369,11 @@ def plot_position_results_per_batch(
 def patch_by_position_group(
     dataset: CounterfactualDataset, sep: str = ",", verbose: bool = True
 ) -> Float[pd.DataFrame, "batch group"]:
-    if "{" in sep:
-        assert dataset.template is not None
+    if (
+        sep not in dataset.prompts[0]
+        and dataset.template is not None
+        and sep in dataset.template
+    ):
         sep_clean = [
             extract_placeholders(dataset.template, prompt)[sep]
             for prompt in dataset.prompts
