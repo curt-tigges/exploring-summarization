@@ -32,7 +32,7 @@ def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
     # Replace placeholders in the template with regex patterns to match any word(s)
     regex_pattern = template
     for placeholder in placeholders:
-        regex_pattern = regex_pattern.replace(f"{{" + placeholder + "}}", r"(.*?)")
+        regex_pattern = regex_pattern.replace("{" + placeholder + "}", r"(.*?)")
 
     # Create a specific pattern for OBJECT_Q by replacing its unique identifier with a more specific regex
     # Assuming OBJECT_Q is always asked in a specific way in the template
@@ -374,6 +374,7 @@ def patch_by_position_group(
         and dataset.template is not None
         and sep in dataset.template
     ):
+        # given sep needs to be interpreted as a placeholder
         sep_clean = [
             extract_placeholders(dataset.template, prompt)[sep]
             for prompt in dataset.prompts
