@@ -38,7 +38,13 @@ def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
     regex_pattern = regex_pattern.replace(r".", r"\.")
     for placeholder in placeholders:
         regex_pattern = regex_pattern.replace(
-            "{" + placeholder + "}", r"(?P<" + placeholder + r">.*?)"
+            "{" + placeholder + "}",
+            r"(?P<" + placeholder + r">.*?)",
+            1,  # only replace 1st occurrence to avoid duplicate keys
+        )
+        regex_pattern = regex_pattern.replace(
+            "{" + placeholder + "}",
+            r"(.*?)",
         )
 
     # Use the generated regex pattern to match the given line and extract the OBJECT_Q
