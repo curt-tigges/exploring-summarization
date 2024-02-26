@@ -640,6 +640,7 @@ class TemplaticDataset(ABC):
             cf_prompts=self.cf_prompts,
             cf_answers=self.cf_answers,
             model=self.model,
+            template=self.template,
         )
 
 
@@ -1379,12 +1380,14 @@ class CounterfactualDataset:
         cf_prompts: List[str],
         cf_answers: List[str],
         model: HookedTransformer,
+        template: Optional[str] = None,
     ) -> None:
         self.prompts = prompts
         self.answers = answers
         self.cf_prompts = cf_prompts
         self.cf_answers = cf_answers
         self.model = model
+        self.template = template
         self.device = self.model.cfg.device
         self._prompt_tokens = None
         self._cf_tokens = None
@@ -1415,6 +1418,7 @@ class CounterfactualDataset:
                 cf_prompts=self.cf_prompts[idx],
                 cf_answers=self.cf_answers[idx],
                 model=self.model,
+                template=self.template,
             )
         else:
             # If the index is an integer, return a tuple with the data at that index
@@ -1435,6 +1439,7 @@ class CounterfactualDataset:
             cf_prompts=[self.cf_prompts[i] for i in index],
             cf_answers=[self.cf_answers[i] for i in index],
             model=self.model,
+            template=self.template,
         )
 
     @property
