@@ -388,7 +388,9 @@ def patch_by_position_group(
             for prompt in dataset.prompts
         ]
         sep_id = torch.tensor(
-            [dataset.model.to_single_token(" " + s) for s in sep_clean]
+            [dataset.model.to_single_token(" " + s) for s in sep_clean],
+            dtype=torch.int64,
+            device=dataset.device,
         ).unsqueeze(
             1
         )  # [batch, 1]
