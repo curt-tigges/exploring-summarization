@@ -398,7 +398,7 @@ def patch_by_position_group(
             f"Separator must have shape (batch, 1), " f"got {sep_id.shape}"
         )
         has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)  # [batch]
-        sep_clean = [s for s, m in zip(sep_clean, has_sep_mask) if m]
+        sep_clean = [" " + s for s, m in zip(sep_clean, has_sep_mask) if m]
     else:
         sep_clean = sep.replace("_", " ")
         sep_id = dataset.model.to_single_token(sep_clean)
