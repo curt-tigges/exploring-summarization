@@ -388,7 +388,9 @@ def patch_by_position_group(
             for prompt in dataset.prompts
         ]
         sep_id = torch.tensor(
-            [[dataset.model.to_single_token(" " + s) for s in sep_clean]]
+            [dataset.model.to_single_token(" " + s) for s in sep_clean]
+        ).unsqueeze(
+            1
         )  # [batch, 1]
         assert sep_id.shape == (len(dataset), 1), (
             f"Separator must have shape (batch, 1), " f"got {sep_id.shape}"
