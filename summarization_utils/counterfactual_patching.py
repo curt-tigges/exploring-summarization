@@ -387,7 +387,9 @@ def patch_by_position_group(
             extract_placeholders(dataset.template, prompt)[sep]
             for prompt in dataset.prompts
         ]
-        sep_id = torch.tensor([dataset.model.to_single_token(s) for s in sep_clean])
+        sep_id = torch.tensor(
+            [dataset.model.to_single_token(" " + s) for s in sep_clean]
+        )
         has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)
         sep_clean = [s for s, m in zip(sep_clean, has_sep_mask) if m]
     else:
