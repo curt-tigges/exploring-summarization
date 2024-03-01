@@ -102,6 +102,12 @@ def assert_alphanumeric_underscore(string):
 
 def clean_string(string: str):
     # Remove all non-alphanumeric characters from the string
+    string = string.replace(".", "period")
+    string = string.replace(",", "comma")
+    string = string.replace("?", "question_mark")
+    string = string.replace(":", "colon")
+    string = string.replace(";", "semicolon")
+    string = string.replace("!", "exclamation_mark")
     return re.sub(r"[^a-zA-Z0-9_]+", "_", string.lower())
 
 

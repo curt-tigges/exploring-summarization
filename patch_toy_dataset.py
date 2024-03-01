@@ -36,6 +36,7 @@ def main(
         model_name=model_cfg.model_name,
         dataset_name=dataset_cfg.dataset_name,
         dataset_size=dataset_cfg.dataset_size,
+        sep=dataset_cfg.sep,
         seed=cfg.seed,
     )
     layer_results_file = ResultsFile(
@@ -45,6 +46,7 @@ def main(
         model_name=model_cfg.model_name,
         dataset_name=dataset_cfg.dataset_name,
         dataset_size=dataset_cfg.dataset_size,
+        sep=dataset_cfg.sep,
         seed=cfg.seed,
     )
     if cfg.skip_if_exists and pos_results_file.exists() and layer_results_file.exists():
@@ -100,7 +102,12 @@ def main(
         bar = px.bar(
             results_pd.mean(axis=0),
             labels={"index": "Position", "value": "Patching metric"},
-            title=f"Patching by position (model={model_cfg.model_name}, dataset={dataset_cfg.dataset_name})",
+            title=(
+                "Patching by position: "
+                f"model={model_cfg.model_name}, "
+                f"dataset={dataset_cfg.dataset_name}, "
+                f"sep={dataset_cfg.sep}"
+            ),
         )
         bar.update_layout(showlegend=False)
         pos_results_file.save(bar)

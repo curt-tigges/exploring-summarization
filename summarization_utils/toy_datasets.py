@@ -640,6 +640,7 @@ class TemplaticDataset(ABC):
             cf_prompts=self.cf_prompts,
             cf_answers=self.cf_answers,
             model=self.model,
+            template=self.template,
         )
 
 
@@ -696,12 +697,11 @@ class BooleanNegatorDataset(TemplaticDataset):
         "ugly",
     ]
 
-    @classmethod
-    def get_attribute_sign_and_index(cls, attr: str) -> Tuple[bool, int]:
-        if attr in cls.POSITIVE_ATTRIBUTES:
-            return True, cls.POSITIVE_ATTRIBUTES.index(attr)
-        elif attr in cls.NEGATIVE_ATTRIBUTES:
-            return False, cls.NEGATIVE_ATTRIBUTES.index(attr)
+    def get_attribute_sign_and_index(self, attr: str) -> Tuple[bool, int]:
+        if attr in self.positive_attributes:
+            return True, self.positive_attributes.index(attr)
+        elif attr in self.negative_attributes:
+            return False, self.negative_attributes.index(attr)
         else:
             raise ValueError(f"Unknown attribute {attr}")
 
@@ -711,6 +711,21 @@ class BooleanNegatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
+        self.names = [
+            name
+            for name in self.NAMES
+            if len(model.to_str_tokens(name, prepend_bos=False)) == 1
+        ]
+        self.positive_attributes = []
+        self.negative_attributes = []
+        for pos_attr, neg_attr in zip(
+            self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES
+        ):
+            pos_len = len(model.to_str_tokens(" " + pos_attr, prepend_bos=False))
+            neg_len = len(model.to_str_tokens(" " + neg_attr, prepend_bos=False))
+            if pos_len == 1 and neg_len == 1:
+                self.positive_attributes.append(pos_attr)
+                self.negative_attributes.append(neg_attr)
         template = (
             wrap_instruction(
                 "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_R}?"
@@ -727,17 +742,17 @@ class BooleanNegatorDataset(TemplaticDataset):
                 attr3_list[attr3_idx],
                 attr_r,
             )
-            for name in self.NAMES
+            for name in self.names
             for attr1_idx, attr2_idx, attr3_idx in itertools.combinations(
-                range(len(self.POSITIVE_ATTRIBUTES)), 3
+                range(len(self.positive_attributes)), 3
             )
-            for attr1_list in [self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES]
-            for attr2_list in [self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES]
-            for attr3_list in [self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES]
+            for attr1_list in [self.positive_attributes, self.negative_attributes]
+            for attr2_list in [self.positive_attributes, self.negative_attributes]
+            for attr3_list in [self.positive_attributes, self.negative_attributes]
             for attr_r in [
-                self.POSITIVE_ATTRIBUTES[attr1_idx],
-                self.POSITIVE_ATTRIBUTES[attr2_idx],
-                self.POSITIVE_ATTRIBUTES[attr3_idx],
+                self.positive_attributes[attr1_idx],
+                self.positive_attributes[attr2_idx],
+                self.positive_attributes[attr3_idx],
             ]
         ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
@@ -756,9 +771,9 @@ class BooleanNegatorDataset(TemplaticDataset):
             ][0]
             attr_sign, attr_idx = self.get_attribute_sign_and_index(attr_to_change)
             cf_attr = (
-                self.POSITIVE_ATTRIBUTES[attr_idx]
+                self.positive_attributes[attr_idx]
                 if not attr_sign
-                else self.NEGATIVE_ATTRIBUTES[attr_idx]
+                else self.negative_attributes[attr_idx]
             )
             cf_attr1, cf_attr2, cf_attr3 = (
                 cf_attr if idx_to_change == 0 else attr1,
@@ -768,14 +783,13 @@ class BooleanNegatorDataset(TemplaticDataset):
             cf_tuples.append((name, cf_attr1, cf_attr2, cf_attr3, attr_r))
         return cf_tuples
 
-    @classmethod
-    def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
+    def get_answers(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
         answers = []
         for _, attr1, attr2, attr3, attr_r in prompt_tuples:
-            attr1_sign, attr1_idx = cls.get_attribute_sign_and_index(attr1)
-            attr2_sign, attr2_idx = cls.get_attribute_sign_and_index(attr2)
-            attr3_sign, attr3_idx = cls.get_attribute_sign_and_index(attr3)
-            _, attr_r_idx = cls.get_attribute_sign_and_index(attr_r)
+            attr1_sign, attr1_idx = self.get_attribute_sign_and_index(attr1)
+            attr2_sign, attr2_idx = self.get_attribute_sign_and_index(attr2)
+            attr3_sign, attr3_idx = self.get_attribute_sign_and_index(attr3)
+            _, attr_r_idx = self.get_attribute_sign_and_index(attr_r)
             if attr_r_idx == attr2_idx:
                 answer = attr2_sign
             elif attr_r_idx == attr1_idx:
@@ -861,12 +875,11 @@ class BooleanOperatorDataset(TemplaticDataset):
         "or",
     ]
 
-    @classmethod
-    def get_attribute_sign_and_index(cls, attr: str) -> Tuple[bool, int]:
-        if attr in cls.POSITIVE_ATTRIBUTES:
-            return True, cls.POSITIVE_ATTRIBUTES.index(attr)
-        elif attr in cls.NEGATIVE_ATTRIBUTES:
-            return False, cls.NEGATIVE_ATTRIBUTES.index(attr)
+    def get_attribute_sign_and_index(self, attr: str) -> Tuple[bool, int]:
+        if attr in self.positive_attributes:
+            return True, self.positive_attributes.index(attr)
+        elif attr in self.negative_attributes:
+            return False, self.negative_attributes.index(attr)
         else:
             raise ValueError(f"Unknown attribute {attr}")
 
@@ -876,6 +889,21 @@ class BooleanOperatorDataset(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
+        self.names = [
+            name
+            for name in self.NAMES
+            if len(model.to_str_tokens(name, prepend_bos=False)) == 1
+        ]
+        self.positive_attributes = []
+        self.negative_attributes = []
+        for pos_attr, neg_attr in zip(
+            self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES
+        ):
+            pos_len = len(model.to_str_tokens(" " + pos_attr, prepend_bos=False))
+            neg_len = len(model.to_str_tokens(" " + neg_attr, prepend_bos=False))
+            if pos_len == 1 and neg_len == 1:
+                self.positive_attributes.append(pos_attr)
+                self.negative_attributes.append(neg_attr)
         template = (
             wrap_instruction(
                 "{NAME} is {ATTR1}. {NAME} is {ATTR2}. {NAME} is {ATTR3}. Is {NAME} {ATTR_L} {OPERATOR} {ATTR_R}?"
@@ -894,51 +922,50 @@ class BooleanOperatorDataset(TemplaticDataset):
                 operator,
                 attr_r,
             )
-            for name in self.NAMES
+            for name in self.names
             for operator in self.OPERATORS
             for attr1_idx, attr2_idx, attr3_idx in itertools.combinations(
-                range(len(self.POSITIVE_ATTRIBUTES)), 3
+                range(len(self.positive_attributes)), 3
             )
-            for attr1_list in [self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES]
-            for attr2_list in [self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES]
-            for attr3_list in [self.POSITIVE_ATTRIBUTES, self.NEGATIVE_ATTRIBUTES]
+            for attr1_list in [self.positive_attributes, self.negative_attributes]
+            for attr2_list in [self.positive_attributes, self.negative_attributes]
+            for attr3_list in [self.positive_attributes, self.negative_attributes]
             for attr_l, attr_r in [
                 (
-                    self.POSITIVE_ATTRIBUTES[attr1_idx],
-                    self.POSITIVE_ATTRIBUTES[attr2_idx],
+                    self.positive_attributes[attr1_idx],
+                    self.positive_attributes[attr2_idx],
                 ),
                 (
-                    self.POSITIVE_ATTRIBUTES[attr2_idx],
-                    self.POSITIVE_ATTRIBUTES[attr1_idx],
+                    self.positive_attributes[attr2_idx],
+                    self.positive_attributes[attr1_idx],
                 ),
                 (
-                    self.POSITIVE_ATTRIBUTES[attr1_idx],
-                    self.POSITIVE_ATTRIBUTES[attr3_idx],
+                    self.positive_attributes[attr1_idx],
+                    self.positive_attributes[attr3_idx],
                 ),
                 (
-                    self.POSITIVE_ATTRIBUTES[attr3_idx],
-                    self.POSITIVE_ATTRIBUTES[attr1_idx],
+                    self.positive_attributes[attr3_idx],
+                    self.positive_attributes[attr1_idx],
                 ),
                 (
-                    self.POSITIVE_ATTRIBUTES[attr2_idx],
-                    self.POSITIVE_ATTRIBUTES[attr3_idx],
+                    self.positive_attributes[attr2_idx],
+                    self.positive_attributes[attr3_idx],
                 ),
                 (
-                    self.POSITIVE_ATTRIBUTES[attr3_idx],
-                    self.POSITIVE_ATTRIBUTES[attr2_idx],
+                    self.positive_attributes[attr3_idx],
+                    self.positive_attributes[attr2_idx],
                 ),
             ]
         ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
         self.seed = seed
 
-    @classmethod
-    def get_answer(cls, attr1, attr2, attr3, attr_l, operator, attr_r) -> bool:
-        attr1_sign, attr1_idx = cls.get_attribute_sign_and_index(attr1)
-        attr2_sign, attr2_idx = cls.get_attribute_sign_and_index(attr2)
-        attr3_sign, attr3_idx = cls.get_attribute_sign_and_index(attr3)
-        _, attr_l_idx = cls.get_attribute_sign_and_index(attr_l)
-        _, attr_r_idx = cls.get_attribute_sign_and_index(attr_r)
+    def get_answer(self, attr1, attr2, attr3, attr_l, operator, attr_r) -> bool:
+        attr1_sign, attr1_idx = self.get_attribute_sign_and_index(attr1)
+        attr2_sign, attr2_idx = self.get_attribute_sign_and_index(attr2)
+        attr3_sign, attr3_idx = self.get_attribute_sign_and_index(attr3)
+        _, attr_l_idx = self.get_attribute_sign_and_index(attr_l)
+        _, attr_r_idx = self.get_attribute_sign_and_index(attr_r)
         if operator == "and":
             if attr_l_idx == attr1_idx and attr_r_idx == attr2_idx:
                 answer = attr1_sign and attr2_sign
@@ -990,19 +1017,19 @@ class BooleanOperatorDataset(TemplaticDataset):
             attr2_sign, attr2_idx = self.get_attribute_sign_and_index(attr2)
             attr3_sign, attr3_idx = self.get_attribute_sign_and_index(attr3)
             opp_attr1 = (
-                self.POSITIVE_ATTRIBUTES[attr1_idx]
+                self.positive_attributes[attr1_idx]
                 if not attr1_sign
-                else self.NEGATIVE_ATTRIBUTES[attr1_idx]
+                else self.negative_attributes[attr1_idx]
             )
             opp_attr2 = (
-                self.POSITIVE_ATTRIBUTES[attr2_idx]
+                self.positive_attributes[attr2_idx]
                 if not attr2_sign
-                else self.NEGATIVE_ATTRIBUTES[attr2_idx]
+                else self.negative_attributes[attr2_idx]
             )
             opp_attr3 = (
-                self.POSITIVE_ATTRIBUTES[attr3_idx]
+                self.positive_attributes[attr3_idx]
                 if not attr3_sign
-                else self.NEGATIVE_ATTRIBUTES[attr3_idx]
+                else self.negative_attributes[attr3_idx]
             )
             # iterate through subsets of [0, 1, 2] with length 1 or 2
             list_of_indices = list(
@@ -1033,11 +1060,10 @@ class BooleanOperatorDataset(TemplaticDataset):
             )
         return cf_tuples
 
-    @classmethod
-    def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
+    def get_answers(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
         answers = []
         for _, attr1, attr2, attr3, attr_l, operator, attr_r in prompt_tuples:
-            answer = cls.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
+            answer = self.get_answer(attr1, attr2, attr3, attr_l, operator, attr_r)
             answers.append("Yes" if answer else "No")
         return answers
 
@@ -1098,6 +1124,17 @@ class ToyBindingTemplate(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
+        self.names = [
+            name
+            for name in self.NAMES
+            if len(model.to_str_tokens(name, prepend_bos=False)) == 1
+        ]
+        self.objects = [
+            obj
+            for obj in self.OBJECTS
+            if len(model.to_str_tokens(" " + obj, prepend_bos=False)) == 1
+            and len(model.to_str_tokens(" " + obj + "s", prepend_bos=False)) == 1
+        ]
         template = (
             wrap_instruction(
                 "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}. Who does the {OBJECT_Q} belong to?",
@@ -1107,8 +1144,8 @@ class ToyBindingTemplate(TemplaticDataset):
         )
         prompt_tuples = [
             (name_l, object_l, name_r, object_r, object_q)
-            for name_l, name_r in itertools.combinations(self.NAMES, 2)
-            for object_l, object_r in itertools.combinations(self.OBJECTS, 2)
+            for name_l, name_r in itertools.combinations(self.names, 2)
+            for object_l, object_r in itertools.combinations(self.objects, 2)
             for object_q in (object_l, object_r)
         ]
         super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
@@ -1205,6 +1242,21 @@ class ToyDeductionTemplate(TemplaticDataset):
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
+        self.names = [
+            name
+            for name in self.NAMES
+            if len(model.to_str_tokens(name, prepend_bos=False)) == 1
+        ]
+        self.groups = [
+            group
+            for group in self.GROUPS
+            if len(model.to_str_tokens(" " + group, prepend_bos=False)) == 1
+        ]
+        self.attributes = [
+            attr
+            for attr in self.ATTRIBUTES
+            if len(model.to_str_tokens(" " + attr, prepend_bos=False)) == 1
+        ]
         template = (
             wrap_instruction(
                 "{NAME} is a {GROUP}. {CAPITAL_GROUP}s are {ATTR}. Conclusion?", model
@@ -1213,9 +1265,9 @@ class ToyDeductionTemplate(TemplaticDataset):
         )
         prompt_tuples = list(
             itertools.product(
-                self.NAMES,
-                self.GROUPS,
-                self.ATTRIBUTES,
+                self.names,
+                self.groups,
+                self.attributes,
             )
         )
         random.seed(seed)
@@ -1227,8 +1279,8 @@ class ToyDeductionTemplate(TemplaticDataset):
         random.seed(self.seed)
         cf_tuples = []
         for name, group, attr in self.prompt_tuples:
-            attr_idx = self.ATTRIBUTES.index(attr)
-            new_attr = self.ATTRIBUTES[(attr_idx + 1) % len(self.ATTRIBUTES)]
+            attr_idx = self.attributes.index(attr)
+            new_attr = self.attributes[(attr_idx + 1) % len(self.attributes)]
             cf_tuples.append((name, group, new_attr))
         return cf_tuples
 
@@ -1314,12 +1366,36 @@ class ToyProfilesTemplate(TemplaticDataset):
         "pilot",
     ]
 
+    @property
+    def cities(self):
+        return list(self.city_to_nationality.keys())
+
+    @property
+    def countries(self):
+        return list(self.city_to_nationality.values())
+
     def __init__(
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
         seed: int = 0,
     ) -> None:
+        self.names = [
+            name
+            for name in self.NAMES
+            if len(model.to_str_tokens(name, prepend_bos=False)) == 1
+        ]
+        self.city_to_nationality = dict()
+        for city, country in self.CITY_TO_NATIONALITY.items():
+            city_len = len(model.to_str_tokens(" " + city, prepend_bos=False))
+            country_len = len(model.to_str_tokens(" " + country, prepend_bos=False))
+            if city_len == 1 and country_len == 1:
+                self.city_to_nationality[city] = country
+        self.jobs = [
+            job
+            for job in self.JOBS
+            if len(model.to_str_tokens(" " + job, prepend_bos=False)) == 1
+        ]
         template = (
             wrap_instruction(
                 "{NAME} was born in {CITY}. {NAME} works as a {JOB}. What is their {QUERY}?",
@@ -1328,7 +1404,7 @@ class ToyProfilesTemplate(TemplaticDataset):
             + "{NAME} {CONJ}"
         )
         prompt_tuples = list(
-            itertools.product(self.NAMES, self.CITIES, self.JOBS, self.QUERIES)
+            itertools.product(self.names, self.cities, self.jobs, self.QUERIES)
         )
         random.seed(seed)
         random.shuffle(prompt_tuples)
@@ -1339,21 +1415,20 @@ class ToyProfilesTemplate(TemplaticDataset):
         cf_tuples = []
         for _, (name, city, job, query) in enumerate(self.prompt_tuples):
             if query == "Nationality":
-                new_city = random.choice([c for c in self.CITIES if c != city])
+                new_city = random.choice([c for c in self.cities if c != city])
                 cf_tuples.append((name, new_city, job, query))
             elif query == "Occupation":
-                new_job = random.choice([j for j in self.JOBS if j != job])
+                new_job = random.choice([j for j in self.jobs if j != job])
                 cf_tuples.append((name, city, new_job, query))
             else:
                 raise ValueError(f"Unknown query {query}")
         return cf_tuples
 
-    @classmethod
-    def get_answers(cls, prompt_tuples: List[Tuple[str, ...]]):
+    def get_answers(self, prompt_tuples: List[Tuple[str, ...]]):
         answers = []
         for _, city, job, query in prompt_tuples:
             if query == "Nationality":
-                answers.append(" " + cls.CITY_TO_NATIONALITY[city])
+                answers.append(" " + self.city_to_nationality[city])
             elif query == "Occupation":
                 answers.append(" " + job)
         return answers
@@ -1379,12 +1454,14 @@ class CounterfactualDataset:
         cf_prompts: List[str],
         cf_answers: List[str],
         model: HookedTransformer,
+        template: Optional[str] = None,
     ) -> None:
         self.prompts = prompts
         self.answers = answers
         self.cf_prompts = cf_prompts
         self.cf_answers = cf_answers
         self.model = model
+        self.template = template
         self.device = self.model.cfg.device
         self._prompt_tokens = None
         self._cf_tokens = None
@@ -1415,6 +1492,7 @@ class CounterfactualDataset:
                 cf_prompts=self.cf_prompts[idx],
                 cf_answers=self.cf_answers[idx],
                 model=self.model,
+                template=self.template,
             )
         else:
             # If the index is an integer, return a tuple with the data at that index
@@ -1435,6 +1513,7 @@ class CounterfactualDataset:
             cf_prompts=[self.cf_prompts[i] for i in index],
             cf_answers=[self.cf_answers[i] for i in index],
             model=self.model,
+            template=self.template,
         )
 
     @property

@@ -3,6 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
 from plotly.subplots import make_subplots
+import re
 import torch
 from torch import Tensor
 import einops
@@ -13,24 +14,78 @@ from summarization_utils.path_patching import act_patch, IterNode, Node
 from summarization_utils.toy_datasets import CounterfactualDataset
 
 
+def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
+    """
+    Args:
+    - template: the template string that contains placeholders
+        e.g.  "{NAME_L} likes {OBJECT_L}. {NAME_R} likes {OBJECT_R}."
+    - prompt: the prompt string that contains the actual values for the placeholders
+        e.g. "John likes apples. Mary likes oranges."
+    Returns:
+    - A dictionary of placeholders and their values
+        e.g. {"NAME_L": "John", "OBJECT_L": "apples", "NAME_R": "Mary", "OBJECT_R": "oranges"}
+    """
+    # Parse the template to identify the structure and placeholders
+    # Assuming placeholders are in the format {PLACEHOLDER}
+    placeholders = re.findall(r"\{(.*?)\}", template)
+
+    # Replace placeholders in the template with regex patterns to match any word(s)
+    regex_pattern = template
+    regex_pattern = regex_pattern.replace(r"[", r"\[")
+    regex_pattern = regex_pattern.replace(r"]", r"\]")
+    regex_pattern = regex_pattern.replace(r"?", r"\?")
+    regex_pattern = regex_pattern.replace(r"/", r"\/")
+    regex_pattern = regex_pattern.replace(r".", r"\.")
+    for placeholder in placeholders:
+        regex_pattern = regex_pattern.replace(
+            "{" + placeholder + "}",
+            r"(?P<" + placeholder + r">.*?)",
+            1,  # only replace 1st occurrence to avoid duplicate keys
+        )
+        regex_pattern = regex_pattern.replace(
+            "{" + placeholder + "}",
+            r"(.*?)",
+        )
+
+    # Use the generated regex pattern to match the given line and extract the OBJECT_Q
+    match = re.search(regex_pattern, prompt, re.IGNORECASE)
+    assert match is not None, (
+        f"Prompt {prompt} does not match the template {template}. "
+        f"Generated regex pattern: {regex_pattern}"
+    )
+    return match.groupdict()
+
+
 def get_position_dict(
-    tokens: Float[Tensor, "batch seq_len"], model: HookedTransformer, sep=","
+    tokens: Float[Tensor, "batch seq_len"],
+    model: HookedTransformer,
+    sep: Union[str, List[str]] = ",",
 ) -> Dict[str, List[List[int]]]:
     """
     Returns a dictionary of positions of clauses and separators
-    e.g. {"clause_0": [[0, 1, 2]], "sep_0": [[3]], "clause_1": [[4, 5, 6]]}
+    e.g. {
+        "clause_0": [[0, 1, 2]], "sep_0": [[3]],
+        "clause_1": [[4, 5, 6]], "sep_1": [[7]],
+        "clause_2": [[8, 9, 10]], "sep_2": [[11]],
+        "sep_all": [[3, 7, 11]]
+    }
     """
-    sep_id = model.to_single_token(sep)
     batch_size, seq_len = tokens.shape
     full_pos_dict = dict()
     for b in range(batch_size):
+        if isinstance(sep, str):
+            sep_id = model.to_single_token(sep)
+        else:
+            sep_id = model.to_single_token(sep[b])
         batch_pos_dict = {}
         sep_count = 0
         current_clause = []
+        sep_all = []
         for s in range(seq_len):
             if tokens[b, s] == sep_id:
                 batch_pos_dict[f"clause_{sep_count}"] = current_clause
                 batch_pos_dict[f"sep_{sep_count}"] = [s]
+                sep_all.append(s)
                 sep_count += 1
                 current_clause = []
                 continue
@@ -38,6 +93,7 @@ def get_position_dict(
                 current_clause.append(s)
         if current_clause:
             batch_pos_dict[f"clause_{sep_count}"] = current_clause
+        batch_pos_dict["sep_all"] = sep_all
         for k, v in batch_pos_dict.items():
             if k in full_pos_dict:
                 full_pos_dict[k].append(v)
@@ -327,15 +383,40 @@ def plot_position_results_per_batch(
 
 
 def patch_by_position_group(
-    dataset: CounterfactualDataset, sep=",", verbose: bool = True
+    dataset: CounterfactualDataset, sep: str = ",", verbose: bool = True
 ) -> Float[pd.DataFrame, "batch group"]:
+    if (
+        sep not in dataset.prompts[0]
+        and dataset.template is not None
+        and sep in dataset.template
+    ):
+        # given sep needs to be interpreted as a placeholder
+        sep_clean = [
+            extract_placeholders(dataset.template, prompt)[sep]
+            for prompt in dataset.prompts
+        ]
+        sep_id = torch.tensor(
+            [dataset.model.to_single_token(" " + s) for s in sep_clean],
+            dtype=torch.int64,
+            device=dataset.device,
+        ).unsqueeze(
+            1
+        )  # [batch, 1]
+        assert sep_id.shape == (len(dataset), 1), (
+            f"Separator must have shape (batch, 1), " f"got {sep_id.shape}"
+        )
+        has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)  # [batch]
+        sep_clean = [" " + s for s, m in zip(sep_clean, has_sep_mask) if m]
+    else:
+        sep_clean = sep.replace("_", " ")
+        sep_id = dataset.model.to_single_token(sep_clean)
+        has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)
     if dataset.base_ldiff.shape[0] == 0:
         dataset.compute_logit_diffs(vectorized=True)
     assert (dataset.base_ldiff != dataset.cf_ldiff).all(), (
         f"Base logit diff {dataset.base_ldiff} and cf logit diff {dataset.cf_ldiff} "
         f"must be different"
     )
-    sep_id = dataset.model.to_single_token(sep)
     assert (
         torch.where(dataset.prompt_tokens == sep_id)[-1]
         == torch.where(dataset.cf_tokens == sep_id)[-1]
@@ -346,13 +427,15 @@ def patch_by_position_group(
     metric = lambda logits: (
         get_logit_diff(
             logits,
-            answer_tokens=dataset.answer_tokens,
-            mask=dataset.mask,
+            answer_tokens=dataset.answer_tokens[has_sep_mask],
+            mask=dataset.mask[has_sep_mask],
             per_prompt=True,
         )
-        - dataset.base_ldiff
-    ) / (dataset.cf_ldiff - dataset.base_ldiff)
-    pos_dict = get_position_dict(dataset.prompt_tokens, model=dataset.model, sep=sep)
+        - dataset.base_ldiff[has_sep_mask]
+    ) / (dataset.cf_ldiff[has_sep_mask] - dataset.base_ldiff[has_sep_mask])
+    pos_dict = get_position_dict(
+        dataset.prompt_tokens[has_sep_mask], model=dataset.model, sep=sep_clean
+    )
     results_dict = dict()
     for pos_label, positions in pos_dict.items():
         nodes = [
@@ -360,7 +443,7 @@ def patch_by_position_group(
             for layer in range(dataset.model.cfg.n_layers)
         ]
         pos_results = act_patch(
-            dataset.model, dataset.prompt_tokens, nodes, metric, new_input=dataset.cf_tokens, verbose=verbose  # type: ignore
+            dataset.model, dataset.prompt_tokens[has_sep_mask], nodes, metric, new_input=dataset.cf_tokens[has_sep_mask], verbose=verbose  # type: ignore
         )
         results_dict[pos_label] = pos_results.to(dtype=torch.float32).cpu().numpy()
     return pd.DataFrame(results_dict)
