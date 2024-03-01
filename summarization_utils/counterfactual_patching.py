@@ -388,9 +388,12 @@ def patch_by_position_group(
             for prompt in dataset.prompts
         ]
         sep_id = torch.tensor(
-            [dataset.model.to_single_token(" " + s) for s in sep_clean]
+            [[dataset.model.to_single_token(" " + s) for s in sep_clean]]
+        )  # [batch, 1]
+        assert sep_id.shape == (len(dataset), 1), (
+            f"Separator must have shape (batch, 1), " f"got {sep_id.shape}"
         )
-        has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)
+        has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)  # [batch]
         sep_clean = [s for s, m in zip(sep_clean, has_sep_mask) if m]
     else:
         sep_clean = sep.replace("_", " ")
