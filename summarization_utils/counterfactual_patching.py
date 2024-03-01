@@ -63,7 +63,12 @@ def get_position_dict(
 ) -> Dict[str, List[List[int]]]:
     """
     Returns a dictionary of positions of clauses and separators
-    e.g. {"clause_0": [[0, 1, 2]], "sep_0": [[3]], "clause_1": [[4, 5, 6]]}
+    e.g. {
+        "clause_0": [[0, 1, 2]], "sep_0": [[3]],
+        "clause_1": [[4, 5, 6]], "sep_1": [[7]],
+        "clause_2": [[8, 9, 10]], "sep_2": [[11]],
+        "sep_all": [[3, 7, 11]]
+    }
     """
     batch_size, seq_len = tokens.shape
     full_pos_dict = dict()
@@ -75,10 +80,12 @@ def get_position_dict(
         batch_pos_dict = {}
         sep_count = 0
         current_clause = []
+        sep_all = []
         for s in range(seq_len):
             if tokens[b, s] == sep_id:
                 batch_pos_dict[f"clause_{sep_count}"] = current_clause
                 batch_pos_dict[f"sep_{sep_count}"] = [s]
+                sep_all.append(s)
                 sep_count += 1
                 current_clause = []
                 continue
@@ -86,6 +93,7 @@ def get_position_dict(
                 current_clause.append(s)
         if current_clause:
             batch_pos_dict[f"clause_{sep_count}"] = current_clause
+        batch_pos_dict["sep_all"] = sep_all
         for k, v in batch_pos_dict.items():
             if k in full_pos_dict:
                 full_pos_dict[k].append(v)
