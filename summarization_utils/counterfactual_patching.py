@@ -53,7 +53,17 @@ def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
         f"Prompt {prompt} does not match the template {template}. "
         f"Generated regex pattern: {regex_pattern}"
     )
-    return match.groupdict()
+    out = match.groupdict()
+    for k, v in out.items():
+        assert isinstance(v, str), (
+            f"Placeholder {k} has value {v} of type {type(v)}, "
+            f"expected a string.\n"
+            f"Prompt: {prompt}\n"
+            f"Template: {template}\n"
+            f"Generated regex pattern: {regex_pattern}\n"
+            f"GroupDict: {out}\n"
+        )
+    return out
 
 
 def get_position_dict(
@@ -400,7 +410,6 @@ def patch_by_position_group(
             assert isinstance(s, str), (
                 f"Separator {sep} must be a string, got {type(s)} {s}\n"
                 f"Full list={sep_clean}\n"
-                f"String sep={sep}\n"
                 f"Template={dataset.template}\n"
             )
         sep_id = torch.tensor(
