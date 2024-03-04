@@ -395,6 +395,14 @@ def patch_by_position_group(
             extract_placeholders(dataset.template, prompt)[sep]
             for prompt in dataset.prompts
         ]
+        # Check that extracted results are strings
+        for s in sep_clean:
+            assert isinstance(s, str), (
+                f"Separator {sep} must be a string, got {type(s)} {s}\n"
+                f"Full list={sep_clean}\n"
+                f"String sep={sep}\n"
+                f"Template={dataset.template}\n"
+            )
         sep_id = torch.tensor(
             [dataset.model.to_single_token(" " + s) for s in sep_clean],
             dtype=torch.int64,
