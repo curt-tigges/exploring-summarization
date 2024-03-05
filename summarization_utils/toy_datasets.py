@@ -564,6 +564,168 @@ QWEN_CODE = [
     ),
 ]
 
+MISTRAL_LOST_ON_WALK = [
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne found her stick again in some bushes. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne lost her hat too in some bushes. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "No",
+        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "No",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "No",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "No",
+        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+    (
+        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+        "Yes",
+        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+        "No",
+    ),
+]
+
+QWEN_LOST_ON_WALK = [
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne found her stick again in some bushes. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne lost her hat too in some bushes. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+    (
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "Yes",
+        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+        "No",
+    ),
+]
+
 
 def wrap_instruction(instruction: str, model: HookedTransformer):
     if "mistral-7b-instruct" in model.cfg.model_name.lower():
@@ -1664,6 +1826,10 @@ class CounterfactualDataset:
             return cls.from_tuples(MISTRAL_CODE, model)
         elif name == "Code" and is_qwen:
             return cls.from_tuples(QWEN_CODE, model)
+        elif name == "LostOnWalk" and is_mistral:
+            return cls.from_tuples(MISTRAL_LOST_ON_WALK, model)
+        elif name == "LostOnWalk" and is_qwen:
+            return cls.from_tuples(QWEN_LOST_ON_WALK, model)
         elif name == "BooleanNegator":
             return BooleanNegatorDataset(model, **kwargs).to_counterfactual()
         elif name == "BooleanOperator":
