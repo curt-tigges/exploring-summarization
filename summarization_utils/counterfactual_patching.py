@@ -1,3 +1,4 @@
+import warnings
 from jaxtyping import Float, Int
 import numpy as np
 import plotly.graph_objects as go
@@ -435,13 +436,14 @@ def patch_by_position_group(
         f"Base logit diff {dataset.base_ldiff} and cf logit diff {dataset.cf_ldiff} "
         f"must be different"
     )
-    assert (
+    if not (
         torch.where(dataset.prompt_tokens == sep_id)[-1]
         == torch.where(dataset.cf_tokens == sep_id)[-1]
-    ).all(), (
-        f"Separators in prompt and counterfactual prompt must be at the same positions, "
-        f"got {torch.where(dataset.prompt_tokens == sep_id)} and {torch.where(dataset.cf_tokens == sep_id)}"
-    )
+    ).all():
+        warnings.warn(
+            f"Separators in prompt and counterfactual prompt are not at the same positions, "
+            f"got {torch.where(dataset.prompt_tokens == sep_id)} and {torch.where(dataset.cf_tokens == sep_id)}"
+        )
     metric = lambda logits: (
         get_logit_diff(
             logits,
