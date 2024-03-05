@@ -436,10 +436,9 @@ def patch_by_position_group(
         f"Base logit diff {dataset.base_ldiff} and cf logit diff {dataset.cf_ldiff} "
         f"must be different"
     )
-    if not (
-        torch.where(dataset.prompt_tokens == sep_id)[-1]
-        == torch.where(dataset.cf_tokens == sep_id)[-1]
-    ).all():
+    is_sep_mask = dataset.prompt_tokens == sep_id
+    is_sep_cf_mask = dataset.cf_tokens == sep_id
+    if not (is_sep_mask == is_sep_cf_mask).all():
         warnings.warn(
             f"Separators in prompt and counterfactual prompt are not at the same positions, "
             f"got {torch.where(dataset.prompt_tokens == sep_id)} and {torch.where(dataset.cf_tokens == sep_id)}"
