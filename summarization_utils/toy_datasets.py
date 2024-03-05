@@ -1610,33 +1610,43 @@ class ToyProfilesTemplate(TemplaticDataset):
 
 class WalkedToTemplate(TemplaticDataset):
     PLACES = ["store", "gym", "house", "library", "office", "park", "school"]
-    ACTIONS = [
-        "walked across town",
-        "ran across town",
-        "drove across town",
-        "needs to go",
-        "likes to go",
-        "wants to go",
+    NAMES = [
+        "Anne",
+        "Bob",
+        "Carol",
+        "David",
+        "Emma",
+        "Mike",
+        "Sarah",
+        "John",
+        "Linda",
+        "Peter",
+        "Grace",
+        "Oliver",
+        "Josh",
+        "Tom",
+        "Rachel",
+        "Henry",
+        "Alice",
+        "George",
     ]
-
-    @classmethod
-    def is_moving(cls, action: str) -> bool:
-        return "walk" in action or "ran" in action or "drove" in action
 
     def __init__(
         self, model: HookedTransformer, dataset_size: int | None = None, seed: int = 0
     ) -> None:
         template = (
             wrap_instruction(
-                "Anne was at the {PLACE0}. She {ACTION1} to the {PLACE1}. Next, she {ACTION2} to the {PLACE2}. Where is Anne right now?",
+                "{NAME0} ran to the {PLACE0}. Then, {NAME1} drove across town to the {PLACE1}. Next, {NAME2} walked to the {PLACE2}. Where is {NAME0} right now?",
                 model,
             )
-            + "Anne is at the"
+            + " {NAME0} is at the"
         )
         prompt_tuples = [
-            (place0, action1, place1, action2, place2)
+            (name0, place0, name1, place1, name2, place2)
             for place0, place1, place2 in itertools.combinations(self.PLACES, 3)
-            for action1, action2 in itertools.product(self.ACTIONS, repeat=2)
+            for name0, name_alt in itertools.combinations(self.NAMES, 2)
+            for name1 in (name0, name_alt)
+            for name2 in (name0, name_alt)
         ]
         random.seed(seed)
         random.shuffle(prompt_tuples)
@@ -1645,57 +1655,52 @@ class WalkedToTemplate(TemplaticDataset):
 
     def get_answers(self, prompt_tuples: List[Tuple[str, ...]]):
         answers = []
-        for _, (place0, action1, place1, action2, place2) in enumerate(prompt_tuples):
-            if self.is_moving(action2):
-                place = place2
-            elif self.is_moving(action1):
-                place = place1
+        for _, (name0, place0, name1, place1, name2, place2) in enumerate(
+            prompt_tuples
+        ):
+            if name2 == name0:
+                answers.append(" " + place2)
+            elif name1 == name0:
+                answers.append(" " + place1)
             else:
-                place = place0
-            answers.append(" " + place)
+                answers.append(" " + place0)
+        return answers
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
-        """Flip the answer by changing action1 or action2"""
+        """Flip the answer by changing name1 or name2"""
         cf_tuples = []
-        for _, (place0, action1, place1, action2, place2) in enumerate(
+        for _, (name0, place0, name1, place1, name2, place2) in enumerate(
             self.prompt_tuples
         ):
-            if self.is_moving(action2):
-                # In order to flip the answer, we need to make sure that action2 is not moving
-                new_action2 = random.choice(
-                    [a for a in self.ACTIONS if not self.is_moving(a)]
-                )
-                cf_tuples.append((place0, action1, place1, new_action2, place2))
-            elif self.is_moving(action1):
-                # In order to flip the answer, we need to make sure that action1 is not moving
-                new_action1 = random.choice(
-                    [a for a in self.ACTIONS if not self.is_moving(a)]
-                )
-                cf_tuples.append((place0, new_action1, place1, action2, place2))
+            if name2 == name0 and name1 != name0:
+                # Format is ABA, counterfactual is ABB
+                cf_tuples.append((name0, place0, name1, place1, name1, place2))
+            elif name1 == name0 and name2 != name0:
+                # Format is AAB, counterfactual is ABB
+                cf_tuples.append((name0, place0, name2, place1, name2, place2))
+            elif name0 == name1 and name0 == name2:
+                # Format is AAA, counterfactual is AAB
+                name_idx = self.NAMES.index(name0)
+                name_alt = self.NAMES[(name_idx + 1) % len(self.NAMES)]
+                cf_tuples.append((name0, place0, name1, place1, name_alt, place2))
+            elif name0 != name1 and name0 != name2:
+                # Format is ABB, counterfactual is AAB
+                cf_tuples.append((name0, place0, name0, place1, name1, place2))
             else:
-                # In order to flip the answer, we must make either action1 or action2 move
-                if random.choice([True, False]):
-                    new_action1 = random.choice(
-                        [a for a in self.ACTIONS if self.is_moving(a)]
-                    )
-                    cf_tuples.append((place0, new_action1, place1, action2, place2))
-                else:
-                    new_action2 = random.choice(
-                        [a for a in self.ACTIONS if self.is_moving(a)]
-                    )
-                    cf_tuples.append((place0, action1, place1, new_action2, place2))
+                raise ValueError(f"Invalid name combination {name0} {name1} {name2}")
         return cf_tuples
 
     def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]):
         return [
             self.template.format(
+                NAME0=name0,
                 PLACE0=place0,
-                ACTION1=action1,
+                NAME1=name1,
                 PLACE1=place1,
-                ACTION2=action2,
+                NAME2=name2,
                 PLACE2=place2,
             )
-            for place0, action1, place1, action2, place2 in prompt_tuples
+            for name0, place0, name1, place1, name2, place2 in prompt_tuples
         ]
 
 
