@@ -1608,6 +1608,102 @@ class ToyProfilesTemplate(TemplaticDataset):
         ]
 
 
+class WalkedToTemplate(TemplaticDataset):
+    PLACES = ["store", "gym", "house", "library", "office", "park", "school"]
+    NAMES = [
+        "Anne",
+        "Bob",
+        "Carol",
+        "David",
+        "Emma",
+        "Mike",
+        "Sarah",
+        "John",
+        "Linda",
+        "Peter",
+        "Grace",
+        "Oliver",
+        "Josh",
+        "Tom",
+        "Rachel",
+        "Henry",
+        "Alice",
+        "George",
+    ]
+
+    def __init__(
+        self, model: HookedTransformer, dataset_size: int | None = None, seed: int = 0
+    ) -> None:
+        template = (
+            wrap_instruction(
+                "{NAME0} ran to the {PLACE0}. Then, {NAME1} drove across town to the {PLACE1}. Next, {NAME2} walked to the {PLACE2}. Where is {NAME0} right now?",
+                model,
+            )
+            + " {NAME0} is at the"
+        )
+        prompt_tuples = [
+            (name0, place0, name1, place1, name2, place2)
+            for place0, place1, place2 in itertools.combinations(self.PLACES, 3)
+            for name0, name_alt in itertools.combinations(self.NAMES, 2)
+            for name1 in (name0, name_alt)
+            for name2 in (name0, name_alt)
+        ]
+        random.seed(seed)
+        random.shuffle(prompt_tuples)
+        super().__init__(template, prompt_tuples, model, dataset_size)
+        self.seed = seed
+
+    def get_answers(self, prompt_tuples: List[Tuple[str, ...]]):
+        answers = []
+        for _, (name0, place0, name1, place1, name2, place2) in enumerate(
+            prompt_tuples
+        ):
+            if name2 == name0:
+                answers.append(" " + place2)
+            elif name1 == name0:
+                answers.append(" " + place1)
+            else:
+                answers.append(" " + place0)
+        return answers
+
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
+        """Flip the answer by changing name1 or name2"""
+        cf_tuples = []
+        for _, (name0, place0, name1, place1, name2, place2) in enumerate(
+            self.prompt_tuples
+        ):
+            if name2 == name0 and name1 != name0:
+                # Format is ABA, counterfactual is ABB
+                cf_tuples.append((name0, place0, name1, place1, name1, place2))
+            elif name1 == name0 and name2 != name0:
+                # Format is AAB, counterfactual is ABB
+                cf_tuples.append((name0, place0, name2, place1, name2, place2))
+            elif name0 == name1 and name0 == name2:
+                # Format is AAA, counterfactual is AAB
+                name_idx = self.NAMES.index(name0)
+                name_alt = self.NAMES[(name_idx + 1) % len(self.NAMES)]
+                cf_tuples.append((name0, place0, name1, place1, name_alt, place2))
+            elif name0 != name1 and name0 != name2:
+                # Format is ABB, counterfactual is AAB
+                cf_tuples.append((name0, place0, name0, place1, name1, place2))
+            else:
+                raise ValueError(f"Invalid name combination {name0} {name1} {name2}")
+        return cf_tuples
+
+    def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]):
+        return [
+            self.template.format(
+                NAME0=name0,
+                PLACE0=place0,
+                NAME1=name1,
+                PLACE1=place1,
+                NAME2=name2,
+                PLACE2=place2,
+            )
+            for name0, place0, name1, place1, name2, place2 in prompt_tuples
+        ]
+
+
 class CounterfactualDataset:
     def __init__(
         self,
@@ -1840,6 +1936,8 @@ class CounterfactualDataset:
             return ToyDeductionTemplate(model, **kwargs).to_counterfactual()
         elif name == "ToyProfiles":
             return ToyProfilesTemplate(model, **kwargs).to_counterfactual()
+        elif name == "WalkedTo":
+            return WalkedToTemplate(model, **kwargs).to_counterfactual()
         else:
             raise ValueError(f"Unknown dataset {name} for model {model.cfg.model_name}")
 
