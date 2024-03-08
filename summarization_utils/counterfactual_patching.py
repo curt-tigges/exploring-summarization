@@ -9,7 +9,7 @@ import torch
 from torch import Tensor
 import einops
 from transformer_lens import HookedTransformer
-from typing import Dict, List, Literal, Union
+from typing import Dict, List, Literal, Optional, Union
 from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import act_patch, IterNode, Node
 from summarization_utils.toy_datasets import CounterfactualDataset
@@ -119,10 +119,25 @@ def get_position_dict(
     return full_pos_dict
 
 
+def is_negative(
+    pos: Union[
+        Literal["each"], int, List[int], List[List[int]], Int[Tensor, "batch *pos"]
+    ]
+) -> bool:
+    if isinstance(pos, str):
+        return False
+    elif isinstance(pos, int):
+        return pos < 0
+    elif isinstance(pos, list):
+        return all([is_negative(p) for p in pos])
+    elif isinstance(pos, Tensor):
+        return bool((pos < 0).all().item())
+
+
 def patch_prompt_base(
-    prompt: str,
+    prompt: Union[str, Float[Tensor, "batch seq_len"]],
     answer: str,
-    cf_prompt: str,
+    cf_prompt: Union[str, Float[Tensor, "batch seq_len"]],
     cf_answer: str,
     model: HookedTransformer,
     prepend_bos: bool = True,
@@ -132,19 +147,27 @@ def patch_prompt_base(
         Literal["each"], int, List[int], List[List[int]], Int[Tensor, "batch *pos"]
     ] = "each",
     verbose: bool = True,
+    check_shape: bool = True,
 ) -> Float[np.ndarray, "*layer pos"]:
-    prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
-    cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
+    if isinstance(prompt, str):
+        prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
+    else:
+        prompt_tokens = prompt
+    if isinstance(cf_prompt, str):
+        cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
+    else:
+        cf_tokens = cf_prompt
     answer_id = model.to_single_token(answer)
     cf_answer_id = model.to_single_token(cf_answer)
     answer_tokens = torch.tensor(
         [answer_id, cf_answer_id], dtype=torch.int64, device=model.cfg.device
     ).unsqueeze(0)
-    assert prompt_tokens.shape == cf_tokens.shape, (
-        f"Prompt and counterfactual prompt must have the same shape, "
-        f"for prompt {prompt} "
-        f"got {prompt_tokens.shape} and {cf_tokens.shape}"
-    )
+    if check_shape:
+        assert prompt_tokens.shape == cf_tokens.shape, (
+            f"Prompt and counterfactual prompt must have the same shape, "
+            f"for prompt {prompt} "
+            f"got {prompt_tokens.shape} and {cf_tokens.shape}"
+        )
     model.reset_hooks(including_permanent=True)
     base_logits: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,
@@ -161,6 +184,8 @@ def patch_prompt_base(
         get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
     ) / (cf_ldiff - base_ldiff)
     if layers == "each":
+        if verbose:
+            print(f"Using IterNode {node_name} for position {seq_pos}")
         nodes = IterNode(node_names=[node_name], seq_pos=seq_pos)
         if seq_pos == "each":
             n_pos = prompt_tokens.shape[1]
@@ -173,7 +198,11 @@ def patch_prompt_base(
         elif isinstance(seq_pos, Tensor) and seq_pos.ndim == 2:
             n_pos = seq_pos.shape[1]
         else:
-            raise ValueError(f"Invalid seq_pos {seq_pos}")
+            raise ValueError(f"Invalid seq_pos {seq_pos} of type {type(seq_pos)}")
+        if verbose:
+            print(
+                f"Computing patching metric for {n_pos} positions because seq_pos={seq_pos}"
+            )
         results = act_patch(
             model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=verbose
         )[
@@ -196,6 +225,8 @@ def patch_prompt_base(
                 pos=n_pos,
             )
     elif layers == "all":
+        if verbose:
+            print(f"Using Node {node_name} for all positions")
         results = [
             act_patch(
                 model,
@@ -294,14 +325,20 @@ def patch_by_layer(
 
 
 def plot_layer_results_per_batch(
-    dataset: CounterfactualDataset, results: List[Float[np.ndarray, "layer pos"]]
+    dataset: CounterfactualDataset,
+    results: List[Float[np.ndarray, "layer pos"]],
+    seq_pos: Optional[Union[int, List[int]]],
 ) -> go.Figure:
+    if isinstance(seq_pos, int):
+        seq_pos = [seq_pos]
     fig = make_subplots(rows=len(results), cols=1)
     for row, (prompt, result) in enumerate(zip(dataset.prompts, results)):
         prompt_str_tokens = dataset.model.to_str_tokens(prompt)
+        if seq_pos is None:
+            seq_pos = list(range(len(prompt_str_tokens)))
         hm = go.Heatmap(
             z=result,
-            x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
+            x=[f"{i}: {prompt_str_tokens[i]}" for i in seq_pos],
             y=[f"{i}" for i in range(dataset.model.cfg.n_layers)],
             colorscale="RdBu",
             zmin=0,
