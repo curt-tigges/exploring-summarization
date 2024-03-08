@@ -1714,22 +1714,15 @@ class StringFormatTemplate(TemplaticDataset):
         "hello",
         "hi",
         "hey",
-        "morning",
-        "afternoon",
-        "evening",
-        "greetings",
+        "yo",
     ]
     SUBJECTS = [
         "friend",
-        "buddy",
         "pal",
         "mate",
         "world",
-        "everyone",
         "you",
         "people",
-        "guys",
-        "ladies",
     ]
     QUERIES = [
         "f'{x}, {y}!'",
@@ -1739,6 +1732,16 @@ class StringFormatTemplate(TemplaticDataset):
     def __init__(
         self, model: HookedTransformer, dataset_size: int | None = None, seed: int = 0
     ) -> None:
+        self.greetings = [
+            greeting
+            for greeting in self.GREETINGS
+            if len(model.to_str_tokens(greeting, prepend_bos=False)) == 1
+        ]
+        self.subjects = [
+            subject
+            for subject in self.SUBJECTS
+            if len(model.to_str_tokens(subject, prepend_bos=False)) == 1
+        ]
         template = (
             wrap_instruction(
                 "Look at this code:\n```\nx = '{GREETING}'\ny = '{SUBJECT}'\nz = {QUERY}\n```\nWhat is the value of `z`?",
@@ -1747,7 +1750,7 @@ class StringFormatTemplate(TemplaticDataset):
             + " The value of `z` is '"
         )
         prompt_tuples = list(
-            itertools.product(self.GREETINGS, self.SUBJECTS, self.QUERIES)
+            itertools.product(self.greetings, self.subjects, self.QUERIES)
         )
         super().__init__(template, prompt_tuples, model, dataset_size, seed=seed)
 
@@ -1756,14 +1759,14 @@ class StringFormatTemplate(TemplaticDataset):
         cf_tuples = []
         for _, (greeting, subject, query) in enumerate(self.prompt_tuples):
             if query.startswith("f'{x}"):
-                greeting_index = self.GREETINGS.index(greeting)
-                greeting_alt = self.GREETINGS[
-                    (greeting_index + 1) % len(self.GREETINGS)
+                greeting_index = self.greetings.index(greeting)
+                greeting_alt = self.greetings[
+                    (greeting_index + 1) % len(self.greetings)
                 ]
                 cf_tuples.append((greeting_alt, subject, query))
             elif query.startswith("f'{y}"):
-                subject_index = self.SUBJECTS.index(subject)
-                subject_alt = self.SUBJECTS[(subject_index + 1) % len(self.SUBJECTS)]
+                subject_index = self.subjects.index(subject)
+                subject_alt = self.subjects[(subject_index + 1) % len(self.subjects)]
                 cf_tuples.append((greeting, subject_alt, query))
             else:
                 raise ValueError(f"Invalid query {query}")
@@ -2020,6 +2023,8 @@ class CounterfactualDataset:
             return ToyProfilesTemplate(model, **kwargs).to_counterfactual()
         elif name == "WalkedTo":
             return WalkedToTemplate(model, **kwargs).to_counterfactual()
+        elif name == "StringFormat":
+            return StringFormatTemplate(model, **kwargs).to_counterfactual()
         else:
             raise ValueError(f"Unknown dataset {name} for model {model.cfg.model_name}")
 
