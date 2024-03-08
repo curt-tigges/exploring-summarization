@@ -147,6 +147,7 @@ def patch_prompt_base(
         Literal["each"], int, List[int], List[List[int]], Int[Tensor, "batch *pos"]
     ] = "each",
     verbose: bool = True,
+    check_shape: bool = True,
 ) -> Float[np.ndarray, "*layer pos"]:
     prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
     cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
@@ -155,11 +156,12 @@ def patch_prompt_base(
     answer_tokens = torch.tensor(
         [answer_id, cf_answer_id], dtype=torch.int64, device=model.cfg.device
     ).unsqueeze(0)
-    assert is_negative(seq_pos) or (prompt_tokens.shape == cf_tokens.shape), (
-        f"Prompt and counterfactual prompt must have the same shape, "
-        f"for prompt {prompt} "
-        f"got {prompt_tokens.shape} and {cf_tokens.shape}"
-    )
+    if check_shape:
+        assert prompt_tokens.shape == cf_tokens.shape, (
+            f"Prompt and counterfactual prompt must have the same shape, "
+            f"for prompt {prompt} "
+            f"got {prompt_tokens.shape} and {cf_tokens.shape}"
+        )
     model.reset_hooks(including_permanent=True)
     base_logits: Float[Tensor, "1 seq_len d_vocab"] = model(
         prompt_tokens,

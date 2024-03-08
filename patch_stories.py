@@ -265,6 +265,7 @@ def patch_by_layer(
             node_name=node_name,
             seq_pos=final_pos,
             verbose=verbose,
+            check_shape=False,
         )
         results_list.append(prompt_results)
     return results_list
