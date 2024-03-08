@@ -19,6 +19,36 @@ from transformer_lens import ActivationCache, HookedTransformer
 from transformer_lens.utils import get_attention_mask
 
 
+def get_final_non_pad_position(
+    attention_mask: Int[Tensor, "batch pos"],
+) -> Float[Tensor, "batch"]:
+    """Gets the final non-padding token from a tensor.
+
+    Args:
+        logits (torch.Tensor): Logits to use.
+        attention_mask (torch.Tensor): Attention mask to use.
+
+    Returns:
+        torch.Tensor: Final non-padding positions
+    """
+    # Get the last non-pad token
+    batch_size, seq_len = attention_mask.shape
+    device = attention_mask.device
+    position_index = einops.repeat(
+        torch.arange(seq_len, device=device),
+        "pos -> batch pos",
+        batch=batch_size,
+    )
+    masked_position = torch.where(
+        attention_mask == 0, torch.full_like(position_index, -1), position_index
+    )
+    last_non_pad_token = einops.reduce(
+        masked_position, "batch pos -> batch", reduction="max"
+    )
+    assert (last_non_pad_token >= 0).all()
+    return last_non_pad_token
+
+
 def get_final_non_pad_token(
     logits: Float[Tensor, "batch pos vocab"],
     attention_mask: Int[Tensor, "batch pos"],
@@ -32,19 +62,7 @@ def get_final_non_pad_token(
     Returns:
         torch.Tensor: Final non-pad token logits.
     """
-    # Get the last non-pad token
-    position_index = einops.repeat(
-        torch.arange(logits.shape[1], device=logits.device),
-        "pos -> batch pos",
-        batch=logits.shape[0],
-    )
-    masked_position = torch.where(
-        attention_mask == 0, torch.full_like(position_index, -1), position_index
-    )
-    last_non_pad_token = einops.reduce(
-        masked_position, "batch pos -> batch", reduction="max"
-    )
-    assert (last_non_pad_token >= 0).all()
+    last_non_pad_token = get_final_non_pad_position(attention_mask)
     # Get the final token logits
     final_token_logits = logits[torch.arange(logits.shape[0]), last_non_pad_token, :]
     return final_token_logits
@@ -374,9 +392,9 @@ def residual_stack_to_logit_diff(
     scaled_residual_stack: Float[Tensor, "... batch d_model"] = cache.apply_ln_to_stack(
         residual_stack, layer=-1, pos_slice=pos
     )
-    answer_residual_directions: Float[
-        Tensor, "batch pair correct d_model"
-    ] = model.tokens_to_residual_directions(answer_tokens)
+    answer_residual_directions: Float[Tensor, "batch pair correct d_model"] = (
+        model.tokens_to_residual_directions(answer_tokens)
+    )
     answer_residual_directions = answer_residual_directions.mean(dim=1)
     logit_diff_directions: Float[Tensor, "batch d_model"] = (
         answer_residual_directions[:, 0] - answer_residual_directions[:, 1]

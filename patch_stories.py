@@ -5,9 +5,14 @@ import random
 from summarization_utils.counterfactual_patching import (
     patch_by_position_group,
     plot_layer_results_per_batch,
+    is_negative,
+    patch_prompt_base,
 )
 from summarization_utils.path_patching import act_patch, IterNode, Node
-from summarization_utils.patching_metrics import get_logit_diff, get_final_non_pad_token
+from summarization_utils.patching_metrics import (
+    get_logit_diff,
+    get_final_non_pad_position,
+)
 from summarization_utils.toy_datasets import (
     CounterfactualDataset,
     TemplaticDataset,
@@ -209,44 +214,6 @@ So, Jack and his mother went outside and found a big red leaf which they printed
 dataset = CounterfactualDataset.from_tuples(stories, model)
 len(dataset)
 
-
-# %%
-def get_final_non_pad_position(
-    attention_mask: Int[Tensor, "batch pos"],
-) -> Float[Tensor, "batch"]:
-    """Gets the final non-padding token from a tensor.
-
-    Args:
-        logits (torch.Tensor): Logits to use.
-        attention_mask (torch.Tensor): Attention mask to use.
-
-    Returns:
-        torch.Tensor: Final non-padding positions
-    """
-    # Get the last non-pad token
-    batch_size, seq_len = attention_mask.shape
-    device = attention_mask.device
-    position_index = einops.repeat(
-        torch.arange(seq_len, device=device),
-        "pos -> batch pos",
-        batch=batch_size,
-    )
-    masked_position = torch.where(
-        attention_mask == 0, torch.full_like(position_index, -1), position_index
-    )
-    last_non_pad_token = einops.reduce(
-        masked_position, "batch pos -> batch", reduction="max"
-    )
-    assert (last_non_pad_token >= 0).all()
-    return last_non_pad_token
-
-
-# %%
-get_final_non_pad_position(dataset.mask)
-
-# %%
-dataset.prompt_tokens.shape
-
 # %%
 assert (
     dataset.prompt_tokens[
@@ -275,114 +242,20 @@ assert (cf_logit_diffs < 0).all()
 
 
 # %%
-def patch_prompt(
-    prompt: str,
-    answer: str,
-    cf_prompt: str,
-    cf_answer: str,
-    model: HookedTransformer,
-    prepend_bos: bool = True,
-    layers: Literal["all", "each"] = "each",
-    node_name: str = "resid_pre",
-    seq_pos: int = -1,
-    verbose: bool = True,
-) -> Float[np.ndarray, "*layer pos"]:
-    prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
-    cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
-    answer_id = model.to_single_token(answer)
-    cf_answer_id = model.to_single_token(cf_answer)
-    answer_tokens = torch.tensor(
-        [answer_id, cf_answer_id], dtype=torch.int64, device=model.cfg.device
-    ).unsqueeze(0)
-    model.reset_hooks(including_permanent=True)
-    if verbose:
-        print(f"Prompt shape: {prompt_tokens.shape}")
-    base_logits: Float[Tensor, "1 seq_len d_vocab"] = model(
-        prompt_tokens,
-        prepend_bos=False,
-        return_type="logits",
-    )
-    base_ldiff = get_logit_diff(base_logits, answer_tokens=answer_tokens)
-    cf_logits, cf_cache = model.run_with_cache(
-        cf_tokens, prepend_bos=False, return_type="logits"
-    )
-    assert isinstance(cf_logits, Tensor)
-    cf_ldiff = get_logit_diff(cf_logits, answer_tokens=answer_tokens)
-    metric = lambda logits: (
-        get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
-    ) / (cf_ldiff - base_ldiff)
-    if layers == "each":
-        nodes = IterNode(node_names=[node_name], seq_pos=seq_pos)
-        if seq_pos == "each":
-            n_pos = prompt_tokens.shape[1]
-        elif seq_pos is None or isinstance(seq_pos, int):
-            n_pos = 1
-        elif isinstance(seq_pos, list):
-            n_pos = len(seq_pos)
-        elif isinstance(seq_pos, Tensor) and seq_pos.ndim == 1:
-            n_pos = 1
-        elif isinstance(seq_pos, Tensor) and seq_pos.ndim == 2:
-            n_pos = seq_pos.shape[1]
-        else:
-            raise ValueError(f"Invalid seq_pos {seq_pos}")
-        results = act_patch(
-            model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=verbose
-        )[
-            node_name
-        ]  # type: ignore
-        results = torch.stack(results, dim=0)  # type: ignore
-        if node_name == "resid_pre":
-            results = einops.rearrange(
-                results,
-                "(pos layer) -> layer pos",
-                layer=model.cfg.n_layers,
-                pos=n_pos,
-            )
-        elif node_name == "z":
-            results = einops.rearrange(
-                results,
-                "(pos layer head) -> layer head pos",
-                layer=model.cfg.n_layers,
-                head=model.cfg.n_heads,
-                pos=n_pos,
-            )
-    elif layers == "all":
-        results = [
-            act_patch(
-                model,
-                prompt_tokens,
-                [
-                    Node(node_name, layer=layer, seq_pos=pos)
-                    for layer in range(model.cfg.n_layers)
-                ],
-                metric,
-                new_cache=cf_cache,
-                verbose=verbose,
-            )
-            for pos in range(prompt_tokens.shape[1])
-        ]
-        results = torch.stack(results, dim=0)
-    else:
-        raise ValueError(f"Invalid layers {layers}")
-    results = results.cpu().to(dtype=torch.float32).numpy()
-    return results
-
-
-# %%
 def patch_by_layer(
     dataset: CounterfactualDataset,
     prepend_bos: bool = True,
     node_name: str = "resid_pre",
-    seq_pos: int = -1,
+    seq_pos: Union[int, List[int]] = -1,
     verbose: bool = True,
 ) -> List[Float[np.ndarray, "layer pos"]]:
-    assert seq_pos < 0
+    assert is_negative(seq_pos)
     final_positions = get_final_non_pad_position(dataset.mask) + 1 + seq_pos
     results_list = []
     for i, (prompt, answer, cf_prompt, cf_answer) in enumerate(dataset):
         final_pos = final_positions[i].item()
         assert isinstance(final_pos, int)
-        prompt_results = patch_prompt(
+        prompt_results = patch_prompt_base(
             prompt,
             answer,
             cf_prompt,
@@ -398,33 +271,9 @@ def patch_by_layer(
 
 
 # %%
+patching_positions = [-5, -4, -3, -2, -1]
 layer_results = patch_by_layer(dataset, verbose=True)
-
 # %%
-type(layer_results)
-
-# %%
-len(layer_results)
-
-# %%
-dataset.prompt_tokens.shape
-
-# %%
-layer_results[0].shape
-
-# %%
-results_array = np.stack([res.squeeze() for res in layer_results], axis=0)
-results_array.shape
-
-# %%
-fig = px.imshow(
-    results_array,
-    zmin=-1,
-    zmax=1,
-    color_continuous_scale="RdBu",
-    labels=dict(x="Layer", y="Batch", color="Patching metric"),
-    title="Patching metric by layer, patching the final name token in TinyStories",
-)
+fig = plot_layer_results_per_batch(dataset, layer_results, seq_pos=patching_positions)
 fig.show()
-
 # %%

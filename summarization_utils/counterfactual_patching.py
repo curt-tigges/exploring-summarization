@@ -9,7 +9,7 @@ import torch
 from torch import Tensor
 import einops
 from transformer_lens import HookedTransformer
-from typing import Dict, List, Literal, Union
+from typing import Dict, List, Literal, Optional, Union
 from summarization_utils.patching_metrics import get_logit_diff
 from summarization_utils.path_patching import act_patch, IterNode, Node
 from summarization_utils.toy_datasets import CounterfactualDataset
@@ -119,6 +119,21 @@ def get_position_dict(
     return full_pos_dict
 
 
+def is_negative(
+    pos: Union[
+        Literal["each"], int, List[int], List[List[int]], Int[Tensor, "batch *pos"]
+    ]
+) -> bool:
+    if isinstance(pos, str):
+        return False
+    elif isinstance(pos, int):
+        return pos < 0
+    elif isinstance(pos, list):
+        return all([is_negative(p) for p in pos])
+    elif isinstance(pos, Tensor):
+        return bool((pos < 0).all().item())
+
+
 def patch_prompt_base(
     prompt: str,
     answer: str,
@@ -140,7 +155,7 @@ def patch_prompt_base(
     answer_tokens = torch.tensor(
         [answer_id, cf_answer_id], dtype=torch.int64, device=model.cfg.device
     ).unsqueeze(0)
-    assert prompt_tokens.shape == cf_tokens.shape, (
+    assert is_negative(seq_pos) or (prompt_tokens.shape == cf_tokens.shape), (
         f"Prompt and counterfactual prompt must have the same shape, "
         f"for prompt {prompt} "
         f"got {prompt_tokens.shape} and {cf_tokens.shape}"
@@ -294,14 +309,20 @@ def patch_by_layer(
 
 
 def plot_layer_results_per_batch(
-    dataset: CounterfactualDataset, results: List[Float[np.ndarray, "layer pos"]]
+    dataset: CounterfactualDataset,
+    results: List[Float[np.ndarray, "layer pos"]],
+    seq_pos: Optional[Union[int, List[int]]],
 ) -> go.Figure:
+    if isinstance(seq_pos, int):
+        seq_pos = [seq_pos]
     fig = make_subplots(rows=len(results), cols=1)
     for row, (prompt, result) in enumerate(zip(dataset.prompts, results)):
         prompt_str_tokens = dataset.model.to_str_tokens(prompt)
+        if seq_pos is None:
+            seq_pos = list(range(len(prompt_str_tokens)))
         hm = go.Heatmap(
             z=result,
-            x=[f"{i}: {t}" for i, t in enumerate(prompt_str_tokens)],
+            x=[f"{i}: {t}" for i, t in zip(seq_pos, prompt_str_tokens)],
             y=[f"{i}" for i in range(dataset.model.cfg.n_layers)],
             colorscale="RdBu",
             zmin=0,
