@@ -8,10 +8,12 @@ from summarization_utils.counterfactual_patching import (
     is_negative,
     patch_prompt_base,
 )
-from summarization_utils.path_patching import act_patch, IterNode, Node
-from summarization_utils.patching_metrics import (
-    get_logit_diff,
-    get_final_non_pad_position,
+from summarization_utils.path_patching import (
+    act_patch,
+    IterNode,
+    Node,
+    get_batch_and_seq_pos_indices,
+    is_homogeneous,
 )
 from summarization_utils.toy_datasets import (
     CounterfactualDataset,
@@ -33,6 +35,7 @@ import os
 from typing import Literal, Union
 import numpy as np
 import plotly.express as px
+from tqdm.auto import tqdm
 
 # %%
 os.environ["TOKENIZERS_PARALLELISM"] = "1"
@@ -49,7 +52,8 @@ model = TokenSafeTransformer.from_pretrained(
     device="cuda",
     dtype="bfloat16",
 )
-
+assert model.tokenizer is not None
+model.tokenizer.padding_side = "left"
 # %%
 stories = [
     (
@@ -107,126 +111,116 @@ One day, Jack found a small pill on the floor. He was fascinated by the shiny ro
 So, Jack and his mother went outside and found a big red leaf which they printed. Jack was very""",
         " happy",
     ),
-    #     (
-    # """Lily liked to draw pictures with her crayons. She had many colors and shapes to make her drawings. She kept her crayons in a box on her desk in her room. Her desk was big and brown and had a chair that was too high for her. She felt uncomfortable when she sat on the chair, but she did not have another place to draw.
-    # One day, her brother Max came into her room. He wanted to play with her crayons. He did not ask Lily, he just took the box from her desk. Lily was angry. She said, "No, Max, those are my crayons. Give them back to me. You have your own toys to play with." Max did not listen. He ran away with the box to his room. He locked the door and started to break the crayons and throw them on the floor.
-    # Lily cried. She knocked on the door and said, "Max, please, open the door. You are ruining my crayons. I need them to draw. They are my supply of colors." Max did not care. He laughed and said, "Too bad, Lily. I like to play with your crayons. They are fun to break and throw. You can't have them back."
-    # Lily was very""",
-    # " sad",
-    # """Once upon a time, there was a boy named John. He was three years old and he was excited for his new birthday. He hoped he would get a special present.
-    # John's mummy took him to the park where all of his friends were. His friends were cheering and they had a big, delicious looking cake. John was very""",
-    # " happy",
-    #     ),
-    #     (
-    # """Once upon a time there was a little girl called Amy. She was three years old and she had a pet puppy. The puppy was very playful and always running around the garden. But one day, Amy's mommy put up a fence in the garden made of wire. It was very high and the puppy was sad that she couldn't play as much anymore.
-    # That night, Amy noticed the puppy outside the fence, trying to get back in the garden. She asked her mommy why the puppy couldn't get in, and her mommy said the fence was there to make sure the puppy behaved.
-    # Amy felt frustrated. Even though she understood why the fence was there, she wanted to make her puppy happy. And so she decided to find a way for her puppy to still have fun.
-    # The next day, Amy and her puppy went for a walk and she discovered a park with lots of wide open spaces and interesting toys. She brought the puppy to this park everyday so that it could have fun and use up its energy.
-    # Amy was very""",
-    # " happy",
-    # """Lily and Ben were best friends. They liked to play with their toys in the garden. One day, Lily brought a new doll. It had long hair and a pretty dress. Ben wanted to play with it.
-    # "Can I see your doll?" Ben asked.
-    # "OK, but be careful," Lily said. She gave him the doll.
-    # Ben looked at the doll. He liked it very much. He wanted to keep it. He had an idea.
-    # "Let's trade," he said. "You can have my car. It is fast and shiny."
-    # Lily liked the car, but she loved her doll more. She shook her head.
-    # "No, thank you. I want my doll back," she said.
-    # Ben did not listen. He ran away with the doll. He hid it behind a bush. He thought Lily would not find it.
-    # Lily was very""",
-    # " sad",
-    #     ),
-    #     (
-    # """Lily liked balloons. She liked to blow them up and tie them. She liked to make them fly and bounce. She liked to play with them with her friends.
-    # But Max did not like balloons. He was scared of them. He thought they were loud and mean. He did not like to see them or touch them. He hated when Lily played with them.
-    # One day, Lily brought a big red balloon to school. She was very happy. She showed it to her friends and they smiled. But Max saw the balloon and he was very worried. He wanted the balloon to go away.
-    # He had an idea. He found a sharp stick and he hid it in his hand. He walked up to Lily and her friends. He pretended to be nice. He said hello and asked to see the balloon.
-    # Lily was surprised. She did not know Max wanted to play. She was kind and she gave him the balloon. She hoped he would like it.
-    # But Max did not like it. He held the balloon and he poked it with the stick. The balloon popped with a loud bang. Lily and her friends screamed and jumped. Max laughed and ran away.
-    # Lily was very""",
-    # " sad",
-    # """Once upon a time there was a little girl called Daisy. Every day she would ask her parents to teach her new things.
-    # One day, Daisy saw a model car on the table and asked her mum to teach her about it. Daisy's mum said she would, but first Daisy had to do her chores. Daisy was sad, but she agreed and finished her chores.
-    # Once the chores were done, Daisy's mum taught her all about the model car. She showed her how to put it together and all the amazing features it had. Daisy was very""",
-    # " happy",
-    #     ),
-    #     (
-    # """Once upon a time, there was a parrot named Polly. Polly was very colorful and had a big beak. Polly lived in a deep forest with many other animals. One day, Polly decided to travel to a new place.
-    # Polly flew for a long time until she reached a big city. She saw many people and buildings, but she didn't know where to go. Suddenly, a man came and took Polly away. He put Polly in a small cage and took her to his house.
-    # Polly was very""",
-    # " sad",
-    # """Once upon a time, there was a little girl named Anna.  Anna wanted to go on an adventure, so she searched around her house to find something to do. Suddenly, Anna spotted something outside that was very unusual. It was a big, red blob of ice! Anna was so excited! She had never seen anything like this before.
-    # Anna ran outside to take a closer look. It was so bright and sparkly in the sun. She reached out her hand to touch it, and it felt cold and crunchy like snow.  Anna was so amazed that she began to search the ground to find more ice like it.
-    # Anna eventually found two more big chunks of red ice scattered around her backyard. She was very excited and she couldn't wait to show her mom and dad. She carefully picked up the pieces and brought them inside.
-    # Anna's mom and dad were so surprised! They couldn't believe that she had found these in her backyard. They thanked her for her discovery and put the ice in the freezer so it could stay cold.
-    # Anna was very""",
-    # " happy",
-    #     ),
-    #     (
-    # """Lily was very happy today. She was going to do a great class with her friends. The class was about animals. Lily loved animals. She had a dog at home. His name was Spot.
-    # She put on her pink dress and her shoes. She took her backpack and her lunch box. She said bye to her mom and dad. They gave her a hug and a kiss. They said, "Have fun, Lily. Learn a lot. We are proud of you."
-    # Lily got on the bus with her friends. They sang songs and played games. They were very excited. They saw the teacher waiting for them at the zoo. The teacher smiled and said, "Hello, children. Welcome to the animal class. Today we are going to see and learn about many different animals. Are you ready?"
-    # The children said, "Yes, teacher. We are ready." They followed the teacher to the first cage. They saw a big lion. He had a mane and sharp teeth. He roared loudly. The children were scared. They hid behind the teacher. The teacher said, "Don't worry, children. The lion can't hurt you. He is behind the bars. He is just saying hello. Can you say hello to the lion?"
-    # Lily was brave. She stepped forward and said, "Hello, lion. You are very big and strong. But I am not afraid of you. I have a dog at home. He is my friend. He barks and wags his tail. Do you have a friend, lion?" The lion looked at Lily and blinked. He stopped roaring. He licked his paw and rubbed his head. He seemed to like Lily. He nodded and said, "Yes, I have a friend. She is a lioness. She is in the next cage. She is very beautiful and smart. She hunts and plays with me. We are happy together." Lily smiled and said, "That's great, lion. I'm happy for you. Can I see your friend?" The lion said, "Of course. Come with me. I'll show you." He walked to the next cage and called his friend. The lioness came and greeted Lily and the other children. They were amazed and curious. They asked the lion and the lioness many questions. They learned a lot about them. They thanked them and said goodbye. They went to see the other animals. They had a great time. They did a great class. Lily was very""",
-    # " happy",
-    # """Andy was a little boy. He saw a task and was eager to try it. He wanted to discover something new. So, he started working on the task.
-    # He worked really hard, but he kept making mistakes. He felt frustrated and discouraged. Despite this, he was still so eager to finish the task that he kept trying.
-    # However, in the end, he couldn't finish the task. He was so disappointed and sad. He had worked so hard and still couldn't succeed.
-    # Andy was very""",
-    # " sad",
-    #     ),
-    #     (
-    # """ohn had been very disobedient. He had not listened to anything his parents had said. So his parents decided they had to punish him.
-    # John was very""",
-    # " sad",
-    # """Once upon a time, there was a little girl named Lily. She was very curious about the world around her. One day, Lily's mommy took her to a tutor to learn new things. The tutor was very nice and taught Lily how to sing a song. Lily loved singing and practiced every day.
-    # One day, Lily's mommy took her to a park. There, they met a group of children who were singing and dancing. Lily was very excited and joined them. She sang the song she learned from her tutor and the other children clapped and cheered.
-    # From that day on, Lily loved singing even more. She told her mommy that she wanted to become a famous singer one day. Her mommy smiled and said that with practice and hard work, she could achieve anything she wanted. Lily was very""",
-    # " happy",
-    #     ),
-    #     (
-    # """Tommy loved ice cream. He liked to feel the cold and sweet in his mouth. He liked to lick the cone and make it last. He liked to choose different flavors every time.
-    # One day, he went to the park with his mom. He saw a big ice cream truck. He ran to it and asked for a cone. The man gave him a cone with three scoops: chocolate, vanilla and strawberry. Tommy was very""",
-    # " happy",
-    # """Once upon a time there was a little girl named Katie. Katie loved lollipops and every day she would beg her Mom for one.
-    # One day when Katie asked for a lollipop, her Mom said, "No, they are too expensive." Katie was very""",
-    # " sad",
-    #     ),
-    #     (
-    # """Once upon a time, there were two friends, Sam and Trudy. They lived in a town with a rich, beautiful structure. Every day, Trudy and Sam would go and visit the structure.
-    # One day, the structure was gone. Trudy was very""",
-    # " sad",
-    # """Once upon a time, there was a little girl named Lily. She lived in a village with her mommy and daddy. The village was very calm and peaceful.
-    # One day, Lily went to the park in the village. She saw a boy playing with a ball. She wanted to play too, so she asked him if she could play with him. The boy said yes, and they started playing together.
-    # After a while, Lily's mommy and daddy came to the park. They saw Lily playing with the boy and they were happy. They clapped their hands and said, "Good job, Lily! You made a new friend!"
-    # Lily was very""",
-    # " happy",
-    #     ),
-    #     (
-    # """Once upon a time, there was a little girl called Daisy. Daisy wanted a new toy, so she went to the toy shop. In the shop, she saw a big bow. She wanted it very much and asked her Dad if she could have it. Her dad said yes, so Daisy was very""",
-    # " happy",
-    # """One day, Sam found a new mint. It was shiny and looked delicious. He couldn't wait to taste it. He ran to his mother and showed it to her.
-    # "Look, Mommy! I found a new mint!" he exclaimed.
-    # "Oh no," said his Mommy. "You can't eat that mint. It's too new."
-    # Sam was very""",
-    # " sad",
-    #     ),
+    (
+        """Lily liked to draw pictures with her crayons. She had many colors and shapes to make her drawings. She kept her crayons in a box on her desk in her room. Her desk was big and brown and had a chair that was too high for her. She felt uncomfortable when she sat on the chair, but she did not have another place to draw.
+    One day, her brother Max came into her room. He wanted to play with her crayons. He did not ask Lily, he just took the box from her desk. Lily was angry. She said, "No, Max, those are my crayons. Give them back to me. You have your own toys to play with." Max did not listen. He ran away with the box to his room. He locked the door and started to break the crayons and throw them on the floor.
+    Lily cried. She knocked on the door and said, "Max, please, open the door. You are ruining my crayons. I need them to draw. They are my supply of colors." Max did not care. He laughed and said, "Too bad, Lily. I like to play with your crayons. They are fun to break and throw. You can't have them back."
+    Lily was very""",
+        " sad",
+        """Once upon a time, there was a boy named John. He was three years old and he was excited for his new birthday. He hoped he would get a special present.
+    John's mummy took him to the park where all of his friends were. His friends were cheering and they had a big, delicious looking cake. John was very""",
+        " happy",
+    ),
+    (
+        """Once upon a time there was a little girl called Amy. She was three years old and she had a pet puppy. The puppy was very playful and always running around the garden. But one day, Amy's mommy put up a fence in the garden made of wire. It was very high and the puppy was sad that she couldn't play as much anymore.
+    That night, Amy noticed the puppy outside the fence, trying to get back in the garden. She asked her mommy why the puppy couldn't get in, and her mommy said the fence was there to make sure the puppy behaved.
+    Amy felt frustrated. Even though she understood why the fence was there, she wanted to make her puppy happy. And so she decided to find a way for her puppy to still have fun.
+    The next day, Amy and her puppy went for a walk and she discovered a park with lots of wide open spaces and interesting toys. She brought the puppy to this park everyday so that it could have fun and use up its energy.
+    Amy was very""",
+        " happy",
+        """Lily and Ben were best friends. They liked to play with their toys in the garden. One day, Lily brought a new doll. It had long hair and a pretty dress. Ben wanted to play with it.
+    "Can I see your doll?" Ben asked.
+    "OK, but be careful," Lily said. She gave him the doll.
+    Ben looked at the doll. He liked it very much. He wanted to keep it. He had an idea.
+    "Let's trade," he said. "You can have my car. It is fast and shiny."
+    Lily liked the car, but she loved her doll more. She shook her head.
+    "No, thank you. I want my doll back," she said.
+    Ben did not listen. He ran away with the doll. He hid it behind a bush. He thought Lily would not find it.
+    Lily was very""",
+        " sad",
+    ),
+    (
+        """Lily liked balloons. She liked to blow them up and tie them. She liked to make them fly and bounce. She liked to play with them with her friends.
+    But Max did not like balloons. He was scared of them. He thought they were loud and mean. He did not like to see them or touch them. He hated when Lily played with them.
+    One day, Lily brought a big red balloon to school. She was very happy. She showed it to her friends and they smiled. But Max saw the balloon and he was very worried. He wanted the balloon to go away.
+    He had an idea. He found a sharp stick and he hid it in his hand. He walked up to Lily and her friends. He pretended to be nice. He said hello and asked to see the balloon.
+    Lily was surprised. She did not know Max wanted to play. She was kind and she gave him the balloon. She hoped he would like it.
+    But Max did not like it. He held the balloon and he poked it with the stick. The balloon popped with a loud bang. Lily and her friends screamed and jumped. Max laughed and ran away.
+    Lily was very""",
+        " sad",
+        """Once upon a time there was a little girl called Daisy. Every day she would ask her parents to teach her new things.
+    One day, Daisy saw a model car on the table and asked her mum to teach her about it. Daisy's mum said she would, but first Daisy had to do her chores. Daisy was sad, but she agreed and finished her chores.
+    Once the chores were done, Daisy's mum taught her all about the model car. She showed her how to put it together and all the amazing features it had. Daisy was very""",
+        " happy",
+    ),
+    (
+        """Once upon a time, there was a parrot named Polly. Polly was very colorful and had a big beak. Polly lived in a deep forest with many other animals. One day, Polly decided to travel to a new place.
+    Polly flew for a long time until she reached a big city. She saw many people and buildings, but she didn't know where to go. Suddenly, a man came and took Polly away. He put Polly in a small cage and took her to his house.
+    Polly was very""",
+        " sad",
+        """Once upon a time, there was a little girl named Anna.  Anna wanted to go on an adventure, so she searched around her house to find something to do. Suddenly, Anna spotted something outside that was very unusual. It was a big, red blob of ice! Anna was so excited! She had never seen anything like this before.
+    Anna ran outside to take a closer look. It was so bright and sparkly in the sun. She reached out her hand to touch it, and it felt cold and crunchy like snow.  Anna was so amazed that she began to search the ground to find more ice like it.
+    Anna eventually found two more big chunks of red ice scattered around her backyard. She was very excited and she couldn't wait to show her mom and dad. She carefully picked up the pieces and brought them inside.
+    Anna's mom and dad were so surprised! They couldn't believe that she had found these in her backyard. They thanked her for her discovery and put the ice in the freezer so it could stay cold.
+    Anna was very""",
+        " happy",
+    ),
+    (
+        """Lily was very happy today. She was going to do a great class with her friends. The class was about animals. Lily loved animals. She had a dog at home. His name was Spot.
+    She put on her pink dress and her shoes. She took her backpack and her lunch box. She said bye to her mom and dad. They gave her a hug and a kiss. They said, "Have fun, Lily. Learn a lot. We are proud of you."
+    Lily got on the bus with her friends. They sang songs and played games. They were very excited. They saw the teacher waiting for them at the zoo. The teacher smiled and said, "Hello, children. Welcome to the animal class. Today we are going to see and learn about many different animals. Are you ready?"
+    The children said, "Yes, teacher. We are ready." They followed the teacher to the first cage. They saw a big lion. He had a mane and sharp teeth. He roared loudly. The children were scared. They hid behind the teacher. The teacher said, "Don't worry, children. The lion can't hurt you. He is behind the bars. He is just saying hello. Can you say hello to the lion?"
+    Lily was brave. She stepped forward and said, "Hello, lion. You are very big and strong. But I am not afraid of you. I have a dog at home. He is my friend. He barks and wags his tail. Do you have a friend, lion?" The lion looked at Lily and blinked. He stopped roaring. He licked his paw and rubbed his head. He seemed to like Lily. He nodded and said, "Yes, I have a friend. She is a lioness. She is in the next cage. She is very beautiful and smart. She hunts and plays with me. We are happy together." Lily smiled and said, "That's great, lion. I'm happy for you. Can I see your friend?" The lion said, "Of course. Come with me. I'll show you." He walked to the next cage and called his friend. The lioness came and greeted Lily and the other children. They were amazed and curious. They asked the lion and the lioness many questions. They learned a lot about them. They thanked them and said goodbye. They went to see the other animals. They had a great time. They did a great class. Lily was very""",
+        " happy",
+        """Andy was a little boy. He saw a task and was eager to try it. He wanted to discover something new. So, he started working on the task.
+    He worked really hard, but he kept making mistakes. He felt frustrated and discouraged. Despite this, he was still so eager to finish the task that he kept trying.
+    However, in the end, he couldn't finish the task. He was so disappointed and sad. He had worked so hard and still couldn't succeed.
+    Andy was very""",
+        " sad",
+    ),
+    (
+        """ohn had been very disobedient. He had not listened to anything his parents had said. So his parents decided they had to punish him.
+    John was very""",
+        " sad",
+        """Once upon a time, there was a little girl named Lily. She was very curious about the world around her. One day, Lily's mommy took her to a tutor to learn new things. The tutor was very nice and taught Lily how to sing a song. Lily loved singing and practiced every day.
+    One day, Lily's mommy took her to a park. There, they met a group of children who were singing and dancing. Lily was very excited and joined them. She sang the song she learned from her tutor and the other children clapped and cheered.
+    From that day on, Lily loved singing even more. She told her mommy that she wanted to become a famous singer one day. Her mommy smiled and said that with practice and hard work, she could achieve anything she wanted. Lily was very""",
+        " happy",
+    ),
+    (
+        """Tommy loved ice cream. He liked to feel the cold and sweet in his mouth. He liked to lick the cone and make it last. He liked to choose different flavors every time.
+    One day, he went to the park with his mom. He saw a big ice cream truck. He ran to it and asked for a cone. The man gave him a cone with three scoops: chocolate, vanilla and strawberry. Tommy was very""",
+        " happy",
+        """Once upon a time there was a little girl named Katie. Katie loved lollipops and every day she would beg her Mom for one.
+    One day when Katie asked for a lollipop, her Mom said, "No, they are too expensive." Katie was very""",
+        " sad",
+    ),
+    (
+        """Once upon a time, there were two friends, Sam and Trudy. They lived in a town with a rich, beautiful structure. Every day, Trudy and Sam would go and visit the structure.
+    One day, the structure was gone. Trudy was very""",
+        " sad",
+        """Once upon a time, there was a little girl named Lily. She lived in a village with her mommy and daddy. The village was very calm and peaceful.
+    One day, Lily went to the park in the village. She saw a boy playing with a ball. She wanted to play too, so she asked him if she could play with him. The boy said yes, and they started playing together.
+    After a while, Lily's mommy and daddy came to the park. They saw Lily playing with the boy and they were happy. They clapped their hands and said, "Good job, Lily! You made a new friend!"
+    Lily was very""",
+        " happy",
+    ),
+    (
+        """Once upon a time, there was a little girl called Daisy. Daisy wanted a new toy, so she went to the toy shop. In the shop, she saw a big bow. She wanted it very much and asked her Dad if she could have it. Her dad said yes, so Daisy was very""",
+        " happy",
+        """One day, Sam found a new mint. It was shiny and looked delicious. He couldn't wait to taste it. He ran to his mother and showed it to her.
+    "Look, Mommy! I found a new mint!" he exclaimed.
+    "Oh no," said his Mommy. "You can't eat that mint. It's too new."
+    Sam was very""",
+        " sad",
+    ),
 ]
 dataset = CounterfactualDataset.from_tuples(stories, model)
 len(dataset)
 
 # %%
-assert (
-    dataset.prompt_tokens[
-        torch.arange(len(dataset)), get_final_non_pad_position(dataset.mask)
-    ]
-    == model.to_single_token(" very")
-).all()
-assert (
-    dataset.prompt_tokens[
-        torch.arange(len(dataset)), get_final_non_pad_position(dataset.mask) - 1
-    ]
-    == model.to_single_token(" was")
-).all()
+assert (dataset.prompt_tokens[:, -1] == model.to_single_token(" very")).all()
+assert (dataset.prompt_tokens[:, -2] == model.to_single_token(" was")).all()
 
 # %%
 dataset.test_prompts(max_prompts=10, top_k=5)
@@ -252,28 +246,67 @@ def patch_by_layer(
     assert is_negative(seq_pos)
     if isinstance(seq_pos, int):
         seq_pos = [seq_pos]
-    if isinstance(seq_pos, list):
-        seq_pos = torch.tensor(seq_pos, device=dataset.mask.device, dtype=torch.int32)
-    assert isinstance(seq_pos, Tensor)
-    final_positions = get_final_non_pad_position(dataset.mask)
+    if isinstance(seq_pos, Tensor):
+        seq_pos = seq_pos.tolist()
+    assert isinstance(seq_pos, list)
+    seq_pos = [pos + dataset.prompt_tokens.shape[1] for pos in seq_pos]
+    dataset_tokens = dataset.prompt_tokens
+    dataset_cf_tokens = dataset.cf_tokens
+    base_seq_len = dataset_tokens.shape[1]
+    cf_seq_len = dataset_cf_tokens.shape[1]
+    if base_seq_len < cf_seq_len:
+        dataset_tokens = torch.cat(
+            [
+                dataset_cf_tokens[:, : cf_seq_len - base_seq_len],
+                dataset_tokens,
+            ],
+            dim=1,
+        )
+    elif base_seq_len > cf_seq_len:
+        dataset_cf_tokens = torch.cat(
+            [
+                dataset_tokens[:, : base_seq_len - cf_seq_len],
+                dataset_cf_tokens,
+            ],
+            dim=1,
+        )
+    assert dataset_tokens.shape == dataset_cf_tokens.shape, (
+        dataset_tokens.shape,
+        dataset_cf_tokens.shape,
+    )
     results_list = []
-    for i, (prompt, answer, cf_prompt, cf_answer) in enumerate(dataset):
-        final_pos = final_positions[i]
-        assert not final_pos.shape
-        prompt_positions = final_pos + 1 + seq_pos
-        if verbose:
-            print(f"Prompt {i} positions: {prompt_positions}")
-        prompt_results = patch_prompt_base(
-            prompt,
-            answer,
-            cf_prompt,
-            cf_answer,
-            model=dataset.model,
-            prepend_bos=prepend_bos,
-            node_name=node_name,
-            seq_pos=prompt_positions,
-            verbose=verbose,
-            check_shape=False,
+    for batch in tqdm(
+        range(len(dataset)), total=len(dataset), desc="Patching dataset by layer"
+    ):
+        prompt_tokens = dataset_tokens[batch]
+        answer = dataset.answers[batch]
+        cf_tokens = dataset_cf_tokens[batch]
+        cf_answer = dataset.cf_answers[batch]
+        prompt_results = []
+        for pos in seq_pos:
+            assert isinstance(pos, int)
+            assert pos < len(prompt_tokens)
+            pos_results: Float[np.ndarray, "layer 1"] = patch_prompt_base(
+                prompt_tokens,
+                answer,
+                cf_tokens,
+                cf_answer,
+                model=dataset.model,
+                prepend_bos=prepend_bos,
+                node_name=node_name,
+                seq_pos=pos,
+                verbose=verbose,
+                check_shape=True,
+            )
+            assert pos_results.shape == (model.cfg.n_layers, 1), (
+                pos_results.shape,
+                (model.cfg.n_layers,),
+            )
+            prompt_results.append(pos_results)
+        prompt_results = np.concatenate(prompt_results, axis=1)
+        assert prompt_results.shape == (model.cfg.n_layers, len(seq_pos)), (
+            prompt_results.shape,
+            (model.cfg.n_layers, len(seq_pos)),
         )
         results_list.append(prompt_results)
     return results_list

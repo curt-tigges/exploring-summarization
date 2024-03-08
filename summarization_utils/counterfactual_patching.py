@@ -135,9 +135,9 @@ def is_negative(
 
 
 def patch_prompt_base(
-    prompt: str,
+    prompt: Union[str, Float[Tensor, "batch seq_len"]],
     answer: str,
-    cf_prompt: str,
+    cf_prompt: Union[str, Float[Tensor, "batch seq_len"]],
     cf_answer: str,
     model: HookedTransformer,
     prepend_bos: bool = True,
@@ -149,8 +149,14 @@ def patch_prompt_base(
     verbose: bool = True,
     check_shape: bool = True,
 ) -> Float[np.ndarray, "*layer pos"]:
-    prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
-    cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
+    if isinstance(prompt, str):
+        prompt_tokens = model.to_tokens(prompt, prepend_bos=prepend_bos)
+    else:
+        prompt_tokens = prompt
+    if isinstance(cf_prompt, str):
+        cf_tokens = model.to_tokens(cf_prompt, prepend_bos=prepend_bos)
+    else:
+        cf_tokens = cf_prompt
     answer_id = model.to_single_token(answer)
     cf_answer_id = model.to_single_token(cf_answer)
     answer_tokens = torch.tensor(
@@ -178,6 +184,8 @@ def patch_prompt_base(
         get_logit_diff(logits, answer_tokens=answer_tokens) - base_ldiff
     ) / (cf_ldiff - base_ldiff)
     if layers == "each":
+        if verbose:
+            print(f"Using IterNode {node_name} for position {seq_pos}")
         nodes = IterNode(node_names=[node_name], seq_pos=seq_pos)
         if seq_pos == "each":
             n_pos = prompt_tokens.shape[1]
@@ -190,7 +198,7 @@ def patch_prompt_base(
         elif isinstance(seq_pos, Tensor) and seq_pos.ndim == 2:
             n_pos = seq_pos.shape[1]
         else:
-            raise ValueError(f"Invalid seq_pos {seq_pos}")
+            raise ValueError(f"Invalid seq_pos {seq_pos} of type {type(seq_pos)}")
         if verbose:
             print(
                 f"Computing patching metric for {n_pos} positions because seq_pos={seq_pos}"
@@ -217,6 +225,8 @@ def patch_prompt_base(
                 pos=n_pos,
             )
     elif layers == "all":
+        if verbose:
+            print(f"Using Node {node_name} for all positions")
         results = [
             act_patch(
                 model,
