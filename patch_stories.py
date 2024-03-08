@@ -15,6 +15,7 @@ from summarization_utils.path_patching import (
     get_batch_and_seq_pos_indices,
     is_homogeneous,
 )
+from summarization_utils.store import ResultsFile
 from summarization_utils.toy_datasets import (
     CounterfactualDataset,
     TemplaticDataset,
@@ -38,12 +39,12 @@ import plotly.express as px
 from tqdm.auto import tqdm
 
 # %%
+torch.set_grad_enabled(False)
 os.environ["TOKENIZERS_PARALLELISM"] = "1"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA_DSA"] = "1"
 
 # %%
-torch.set_grad_enabled(False)
 model = TokenSafeTransformer.from_pretrained(
     "mistral-7b-instruct",
     fold_ln=False,
@@ -314,9 +315,14 @@ def patch_by_layer(
 
 # %%
 patching_positions = [-5, -4, -3, -2, -1]
-layer_results = patch_by_layer(dataset, verbose=True, seq_pos=patching_positions)
+layer_results = patch_by_layer(dataset, verbose=False, seq_pos=patching_positions)
 layer_results[0].shape
 # %%
 fig = plot_layer_results_per_batch(dataset, layer_results, seq_pos=patching_positions)
 fig.show()
+# %%
+results_file = ResultsFile(
+    "tiny_stories_patch_name_by_layer", "html", result_type="plots"
+)
+results_file.save(fig)
 # %%
