@@ -246,15 +246,23 @@ def patch_by_layer(
     dataset: CounterfactualDataset,
     prepend_bos: bool = True,
     node_name: str = "resid_pre",
-    seq_pos: Union[int, List[int]] = -1,
+    seq_pos: Union[int, List[int], Int[Tensor, "pos"]] = -1,
     verbose: bool = True,
 ) -> List[Float[np.ndarray, "layer pos"]]:
     assert is_negative(seq_pos)
-    final_positions = get_final_non_pad_position(dataset.mask) + 1 + seq_pos
+    if isinstance(seq_pos, int):
+        seq_pos = [seq_pos]
+    if isinstance(seq_pos, list):
+        seq_pos = torch.tensor(seq_pos, device=dataset.mask.device, dtype=torch.int32)
+    assert isinstance(seq_pos, Tensor)
+    final_positions = get_final_non_pad_position(dataset.mask)
     results_list = []
     for i, (prompt, answer, cf_prompt, cf_answer) in enumerate(dataset):
-        final_pos = final_positions[i].item()
-        assert isinstance(final_pos, int)
+        final_pos = final_positions[i]
+        assert not final_pos.shape
+        prompt_positions = final_pos + 1 + seq_pos
+        if verbose:
+            print(f"Prompt {i} positions: {prompt_positions}")
         prompt_results = patch_prompt_base(
             prompt,
             answer,
@@ -263,7 +271,7 @@ def patch_by_layer(
             model=dataset.model,
             prepend_bos=prepend_bos,
             node_name=node_name,
-            seq_pos=final_pos,
+            seq_pos=prompt_positions,
             verbose=verbose,
             check_shape=False,
         )
@@ -273,7 +281,8 @@ def patch_by_layer(
 
 # %%
 patching_positions = [-5, -4, -3, -2, -1]
-layer_results = patch_by_layer(dataset, verbose=True)
+layer_results = patch_by_layer(dataset, verbose=True, seq_pos=patching_positions)
+layer_results[0].shape
 # %%
 fig = plot_layer_results_per_batch(dataset, layer_results, seq_pos=patching_positions)
 fig.show()

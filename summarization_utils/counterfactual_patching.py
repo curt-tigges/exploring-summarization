@@ -191,6 +191,10 @@ def patch_prompt_base(
             n_pos = seq_pos.shape[1]
         else:
             raise ValueError(f"Invalid seq_pos {seq_pos}")
+        if verbose:
+            print(
+                f"Computing patching metric for {n_pos} positions because seq_pos={seq_pos}"
+            )
         results = act_patch(
             model, prompt_tokens, nodes, metric, new_cache=cf_cache, verbose=verbose
         )[
