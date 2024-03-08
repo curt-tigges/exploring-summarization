@@ -753,11 +753,16 @@ class TemplaticDataset(ABC):
         prompt_tuples: List[Tuple[str, ...]],
         model: HookedTransformer,
         dataset_size: Optional[int] = None,
+        seed: Optional[int] = None,
     ) -> None:
+        if seed is not None:
+            random.seed(seed)
+            random.shuffle(prompt_tuples)
         self.template = template
         self.prompt_tuples = prompt_tuples[:dataset_size]
         self._cf_tuples = []
         self.model = model
+        self.seed = seed
 
     @abstractmethod
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
@@ -871,7 +876,7 @@ class BooleanNegatorDataset(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        seed: int = 0,
+        seed: Optional[int] = None,
     ) -> None:
         self.names = [
             name
@@ -917,8 +922,9 @@ class BooleanNegatorDataset(TemplaticDataset):
                 self.positive_attributes[attr3_idx],
             ]
         ]
-        super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
-        self.seed = seed
+        super().__init__(
+            template, prompt_tuples, model, dataset_size=dataset_size, seed=seed
+        )
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         random.seed(self.seed)
@@ -1049,7 +1055,7 @@ class BooleanOperatorDataset(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        seed: int = 0,
+        seed: Optional[int] = None,
     ) -> None:
         self.names = [
             name
@@ -1119,8 +1125,9 @@ class BooleanOperatorDataset(TemplaticDataset):
                 ),
             ]
         ]
-        super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
-        self.seed = seed
+        super().__init__(
+            template, prompt_tuples, model, dataset_size=dataset_size, seed=seed
+        )
 
     def get_answer(self, attr1, attr2, attr3, attr_l, operator, attr_r) -> bool:
         attr1_sign, attr1_idx = self.get_attribute_sign_and_index(attr1)
@@ -1284,7 +1291,7 @@ class ToyBindingTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        seed: int = 0,
+        seed: Optional[int] = None,
     ) -> None:
         self.names = [
             name
@@ -1310,8 +1317,9 @@ class ToyBindingTemplate(TemplaticDataset):
             for object_l, object_r in itertools.combinations(self.objects, 2)
             for object_q in (object_l, object_r)
         ]
-        super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
-        self.seed = seed
+        super().__init__(
+            template, prompt_tuples, model, dataset_size=dataset_size, seed=seed
+        )
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         # Just swap the left and right objects
@@ -1402,7 +1410,7 @@ class ToyDeductionTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        seed: int = 0,
+        seed: Optional[int] = None,
     ) -> None:
         self.names = [
             name
@@ -1434,8 +1442,9 @@ class ToyDeductionTemplate(TemplaticDataset):
         )
         random.seed(seed)
         random.shuffle(prompt_tuples)
-        super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
-        self.seed = seed
+        super().__init__(
+            template, prompt_tuples, model, dataset_size=dataset_size, seed=seed
+        )
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         random.seed(self.seed)
@@ -1540,7 +1549,7 @@ class ToyProfilesTemplate(TemplaticDataset):
         self,
         model: HookedTransformer,
         dataset_size: int = 100,
-        seed: int = 0,
+        seed: Optional[int] = None,
     ) -> None:
         self.names = [
             name
@@ -1568,10 +1577,9 @@ class ToyProfilesTemplate(TemplaticDataset):
         prompt_tuples = list(
             itertools.product(self.names, self.cities, self.jobs, self.QUERIES)
         )
-        random.seed(seed)
-        random.shuffle(prompt_tuples)
-        super().__init__(template, prompt_tuples, model, dataset_size=dataset_size)
-        self.seed = seed
+        super().__init__(
+            template, prompt_tuples, model, dataset_size=dataset_size, seed=seed
+        )
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
         cf_tuples = []
@@ -1648,10 +1656,7 @@ class WalkedToTemplate(TemplaticDataset):
             for name1 in (name0, name_alt)
             for name2 in (name0, name_alt)
         ]
-        random.seed(seed)
-        random.shuffle(prompt_tuples)
-        super().__init__(template, prompt_tuples, model, dataset_size)
-        self.seed = seed
+        super().__init__(template, prompt_tuples, model, dataset_size, seed=seed)
 
     def get_answers(self, prompt_tuples: List[Tuple[str, ...]]):
         answers = []
@@ -1701,6 +1706,83 @@ class WalkedToTemplate(TemplaticDataset):
                 PLACE2=place2,
             )
             for name0, place0, name1, place1, name2, place2 in prompt_tuples
+        ]
+
+
+class StringFormatTemplate(TemplaticDataset):
+    GREETINGS = [
+        "hello",
+        "hi",
+        "hey",
+        "morning",
+        "afternoon",
+        "evening",
+        "greetings",
+    ]
+    SUBJECTS = [
+        "friend",
+        "buddy",
+        "pal",
+        "mate",
+        "world",
+        "everyone",
+        "you",
+        "people",
+        "guys",
+        "ladies",
+    ]
+    QUERIES = [
+        "f'{x}, {y}!'",
+        "f'{y}, {x}'",
+    ]
+
+    def __init__(
+        self, model: HookedTransformer, dataset_size: int | None = None, seed: int = 0
+    ) -> None:
+        template = (
+            wrap_instruction(
+                "Look at this code:\n```\nx = '{GREETING}'\ny = '{SUBJECT}'\nz = {QUERY}\n```\nWhat is the value of `z`?",
+                model,
+            )
+            + " The value of `z` is '"
+        )
+        prompt_tuples = list(
+            itertools.product(self.GREETINGS, self.SUBJECTS, self.QUERIES)
+        )
+        super().__init__(template, prompt_tuples, model, dataset_size, seed=seed)
+
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
+        """Flip the answer by changing the greeting or subject as required"""
+        cf_tuples = []
+        for _, (greeting, subject, query) in enumerate(self.prompt_tuples):
+            if query.startswith("f'{x}"):
+                greeting_index = self.GREETINGS.index(greeting)
+                greeting_alt = self.GREETINGS[
+                    (greeting_index + 1) % len(self.GREETINGS)
+                ]
+                cf_tuples.append((greeting_alt, subject, query))
+            elif query.startswith("f'{y}"):
+                subject_index = self.SUBJECTS.index(subject)
+                subject_alt = self.SUBJECTS[(subject_index + 1) % len(self.SUBJECTS)]
+                cf_tuples.append((greeting, subject_alt, query))
+            else:
+                raise ValueError(f"Invalid query {query}")
+        return cf_tuples
+
+    def get_answers(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
+        return [
+            greeting if query.startswith("f'{x}") else subject
+            for greeting, subject, query in prompt_tuples
+        ]
+
+    def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]):
+        return [
+            self.template.format(
+                GREETING=greeting,
+                SUBJECT=subject,
+                QUERY=query,
+            )
+            for greeting, subject, query in prompt_tuples
         ]
 
 
