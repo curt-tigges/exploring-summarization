@@ -324,7 +324,7 @@ def plot_layer_results_per_batch(
             seq_pos = list(range(len(prompt_str_tokens)))
         hm = go.Heatmap(
             z=result,
-            x=[f"{i}: {t}" for i, t in zip(seq_pos, prompt_str_tokens)],
+            x=[f"{i}: {prompt_str_tokens[i]}" for i in seq_pos],
             y=[f"{i}" for i in range(dataset.model.cfg.n_layers)],
             colorscale="RdBu",
             zmin=0,
