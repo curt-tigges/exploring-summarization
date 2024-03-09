@@ -1,5 +1,6 @@
 import itertools
 import random
+import warnings
 from jaxtyping import Float, Int
 from typing import List, Optional, Tuple
 import torch
@@ -2026,7 +2027,8 @@ class CounterfactualDataset:
         elif name == "StringFormat":
             return StringFormatTemplate(model, **kwargs).to_counterfactual()
         else:
-            raise ValueError(f"Unknown dataset {name} for model {model.cfg.model_name}")
+            warnings.warn(f"Unknown dataset {name} for model {model.cfg.model_name}")
+            return
 
     def __iter__(self):
         return iter(zip(self.prompts, self.answers, self.cf_prompts, self.cf_answers))

@@ -1,0 +1,6 @@
+model_name: "EleutherAI/pythia-2.8b"
+torch_dtype: "float32"
+device: "cuda"
+fold_ln: false
+center_writing_weights: false
+center_unembed: false

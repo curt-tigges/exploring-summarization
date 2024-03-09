@@ -68,6 +68,8 @@ def main(
     dataset = CounterfactualDataset.from_name(
         dataset_cfg.dataset_name, model, dataset_size=dataset_cfg.dataset_size
     )
+    if dataset is None:
+        return
     dataset.check_lengths_match()
     dataset.test_prompts(max_prompts=cfg.prompts, top_k=cfg.top_k)
     all_logit_diffs, cf_logit_diffs = dataset.compute_logit_diffs()

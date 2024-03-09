@@ -327,7 +327,7 @@ def patch_by_layer(
 def plot_layer_results_per_batch(
     dataset: CounterfactualDataset,
     results: List[Float[np.ndarray, "layer pos"]],
-    seq_pos: Optional[Union[int, List[int]]],
+    seq_pos: Optional[Union[int, List[int]]] = None,
 ) -> go.Figure:
     if isinstance(seq_pos, int):
         seq_pos = [seq_pos]
@@ -335,10 +335,12 @@ def plot_layer_results_per_batch(
     for row, (prompt, result) in enumerate(zip(dataset.prompts, results)):
         prompt_str_tokens = dataset.model.to_str_tokens(prompt)
         if seq_pos is None:
-            seq_pos = list(range(len(prompt_str_tokens)))
+            x = [f"{i}: {prompt_str_tokens[i]}" for i in range(len(prompt_str_tokens))]
+        else:
+            x = [f"{i}: {prompt_str_tokens[i]}" for i in seq_pos]
         hm = go.Heatmap(
             z=result,
-            x=[f"{i}: {prompt_str_tokens[i]}" for i in seq_pos],
+            x=x,
             y=[f"{i}" for i in range(dataset.model.cfg.n_layers)],
             colorscale="RdBu",
             zmin=0,
