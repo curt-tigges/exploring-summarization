@@ -327,7 +327,7 @@ def patch_by_layer(
 def plot_layer_results_per_batch(
     dataset: CounterfactualDataset,
     results: List[Float[np.ndarray, "layer pos"]],
-    seq_pos: Optional[Union[int, List[int]]],
+    seq_pos: Optional[Union[int, List[int]]] = None,
 ) -> go.Figure:
     if isinstance(seq_pos, int):
         seq_pos = [seq_pos]
