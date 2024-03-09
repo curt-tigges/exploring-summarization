@@ -1796,9 +1796,13 @@ class CodeSumTemplate(TemplaticDataset):
     def __init__(
         self, model: HookedTransformer, dataset_size: int | None = None, seed: int = 0
     ) -> None:
-        self.nums = [f"{i:d}" for i in range(self.MAX_INT)]
         template = "x = {NUM1}\nx += {NUM2}\nprint(x) # "
-        prompt_tuples = list(itertools.product(self.nums, repeat=2))
+        prompt_tuples = list(
+            itertools.product(
+                [f"{i:d}" for i in range(self.MAX_INT)],
+                [f"{i:d}" for i in range(1, self.MAX_INT)],
+            )
+        )
         super().__init__(template, prompt_tuples, model, dataset_size, seed=seed)
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
