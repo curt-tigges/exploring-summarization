@@ -1,8 +1,10 @@
+*.tar
 *.ipynb
 .vscode/
 results/cache
 results/offline
 results/notebooks
+results/plots
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
