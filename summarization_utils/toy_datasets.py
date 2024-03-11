@@ -2175,7 +2175,11 @@ class CounterfactualDataset:
     ):
         family = model.cfg.model_name.lower().split("/")[-1].split("-")[0].split(".")[0]
         family = "".join([char for char in family if not char.isdigit()])
-        return cls.from_tuples(data[family], model)
+        if family in data:
+            return cls.from_tuples(data[family], model)
+        else:
+            warnings.warn(f"Unknown family {family} (model={model.cfg.model_name})")
+            return
 
     @classmethod
     def empty(cls, model: HookedTransformer):
