@@ -1798,23 +1798,17 @@ class CodeSumTemplate(TemplaticDataset):
     ) -> None:
         template = "x = {NUM1}\nx += {NUM2}\nprint(x) # "
         prompt_tuples = list(
-            itertools.product(
-                [f"{i:d}" for i in range(self.MAX_INT)],
-                [f"{i:d}" for i in range(1, self.MAX_INT)],
-            )
+            itertools.combinations([f"{i:d}" for i in range(1, self.MAX_INT)], 2)
         )
         super().__init__(template, prompt_tuples, model, dataset_size, seed=seed)
 
     def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
-        """Flip the answer by changing the greeting or subject as required"""
+        """Flip the answer by changing the starting value"""
         cf_tuples = []
         for _, (num1, num2) in enumerate(self.prompt_tuples):
             num1 = int(num1)
             num2 = int(num2)
-            if num1 % 2 == 0:
-                cf_tuples.append((str(num1 + 1 % self.MAX_INT), num2))
-            else:
-                cf_tuples.append((num1, str(num2 + 1 % self.MAX_INT)))
+            cf_tuples.append((str(num1 + 1 % self.MAX_INT), num2))
         return cf_tuples
 
     def get_answers(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
