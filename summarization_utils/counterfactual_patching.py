@@ -38,6 +38,9 @@ def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
     regex_pattern = regex_pattern.replace(r"/", r"\/")
     regex_pattern = regex_pattern.replace(r".", r"\.")
     regex_pattern = regex_pattern.replace(r"|", r"\|")
+    regex_pattern = regex_pattern.replace(r"(", r"\(")
+    regex_pattern = regex_pattern.replace(r")", r"\)")
+    regex_pattern = regex_pattern.replace(r"+", r"\+")
     for placeholder in placeholders:
         regex_pattern = regex_pattern.replace(
             "{" + placeholder + "}",
