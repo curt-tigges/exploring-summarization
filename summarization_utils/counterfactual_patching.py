@@ -456,6 +456,15 @@ def patch_by_position_group(
                 f"Full list={sep_clean}\n"
                 f"Template={dataset.template}\n"
             )
+        # Prepend a space to the separator if that is still a single token
+        sep_clean = [
+            (
+                " " + s
+                if len(dataset.model.to_str_tokens(" " + s, prepend_bos=False)) == 1
+                else s
+            )
+            for s in sep_clean
+        ]
         sep_id = torch.tensor(
             [dataset.model.to_single_token(" " + s) for s in sep_clean],
             dtype=torch.int64,
