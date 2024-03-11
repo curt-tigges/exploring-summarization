@@ -2,7 +2,7 @@ import itertools
 import random
 import warnings
 from jaxtyping import Float, Int
-from typing import List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 import torch
 from torch import Tensor
 from transformer_lens import HookedTransformer
@@ -11,721 +11,879 @@ from summarization_utils.patching_metrics import get_logit_diff
 from abc import ABC, abstractmethod
 
 
-QWEN_KNOWN_FOR = [
-    (
-        "Known for being the first to walk on the moon, Neil",
-        " Armstrong",
-        "Known for being the star of the movie Jazz Singer, Neil",
-        " Diamond",
-    ),
-    (
-        "Known for being the first to cross Antarctica, Sir",
-        " Ernest",
-        "Known for being the first to summit Everest, Sir",
-        " Edmund",
-    ),
-    (
-        "Known for being the fastest production car in the world, the",
-        " Bug",
-        "Known for being the best selling car in the world, the",
-        " Ford",
-    ),
-    (
-        "Known for being the most popular fruit in the world, the humble",
-        " apple",
-        "Known for being the most popular vegetable in the world, the humble",
-        " potato",
-    ),
-    (
-        "Known for being a wonder of the world located in Australia, the",
-        " Great",
-        "Known for being a wonder of the world located in India, the",
-        " Taj",
-    ),
-    (
-        "Known for being the most popular sport in Brazil, the game of",
-        " soccer",
-        "Known for being the most popular sport in India, the game of",
-        " cricket",
-    ),
-]
+KNOWN_FOR = dict(
+    qwen=[
+        (
+            "Known for being the first to walk on the moon, Neil",
+            " Armstrong",
+            "Known for being the star of the movie Jazz Singer, Neil",
+            " Diamond",
+        ),
+        (
+            "Known for being the first to cross Antarctica, Sir",
+            " Ernest",
+            "Known for being the first to summit Everest, Sir",
+            " Edmund",
+        ),
+        (
+            "Known for being the fastest production car in the world, the",
+            " Bug",
+            "Known for being the best selling car in the world, the",
+            " Ford",
+        ),
+        (
+            "Known for being the most popular fruit in the world, the humble",
+            " apple",
+            "Known for being the most popular vegetable in the world, the humble",
+            " potato",
+        ),
+        (
+            "Known for being a wonder of the world located in Australia, the",
+            " Great",
+            "Known for being a wonder of the world located in India, the",
+            " Taj",
+        ),
+        (
+            "Known for being the most popular sport in Brazil, the game of",
+            " soccer",
+            "Known for being the most popular sport in India, the game of",
+            " cricket",
+        ),
+    ],
+    pythia=[
+        (
+            "Known for being the first to walk on the moon, Neil",
+            " Armstrong",
+            "Known for being the star of the movie Jazz Singer, Neil",
+            " Diamond",
+        ),
+        (
+            "Known for being the first to cross Antarctica, Sir",
+            " Ernest",
+            "Known for being the first to summit Everest, Sir",
+            " Edmund",
+        ),
+        (
+            "Known for being the fastest production car in the world, the",
+            " McL",
+            "Known for being the best selling car in the world, the",
+            " Ford",
+        ),
+        (
+            "Known for being the most popular fruit in the world, the humble",
+            " apple",
+            "Known for being the most popular vegetable in the world, the humble",
+            " potato",
+        ),
+        (
+            "Known for being a wonder of the world located in Australia, the",
+            " Great",
+            "Known for being a wonder of the world located in India, the",
+            " Taj",
+        ),
+        (
+            "Known for being the most popular sport in Brazil, the game of",
+            " soccer",
+            "Known for being the most popular sport in India, the game of",
+            " cricket",
+        ),
+    ],
+    mistral=[
+        (
+            "Known for being the first to walk on the moon, Neil",
+            " Arm",
+            "Known for being the star of movie Jazz Singer, Neil",
+            " Diamond",
+        ),
+        (
+            "Known as first to cross Antarctica, Sir",
+            " Ernest",
+            "Known for being the first to summit Everest, Sir",
+            " Ed",
+        ),
+        (
+            "Known for being the fastest production car in the world, the",
+            " Mc",
+            "Known for being the best selling car in the world, the",
+            " Ford",
+        ),
+        (
+            "Known for being the most popular fruit in the world, the humble",
+            " apple",
+            "Known for being the most popular crop in the world, the humble",
+            " pot",
+        ),
+        (
+            "Known for being a wonder of the world located in Australia, the",
+            " Great",
+            "Known for being a wonder of the world located in India, the",
+            " T",
+        ),
+        (
+            "Known for being the most popular sport in Brazil, the game of",
+            " soccer",
+            "Known for being the most popular sport in India, the game of",
+            " cricket",
+        ),
+    ],
+    gemma=[
+        (
+            "Known for being the first to walk on the moon, Neil",
+            " Armstrong",
+            "Known for being the star of the movie Jazz Singer, Neil",
+            " Diamond",
+        ),
+        (
+            "Known for being the first to cross Antarctica, Sir",
+            " Ernest",
+            "Known for being the first to summit Everest, Sir",
+            " Edmund",
+        ),
+        (
+            "Known for being the fastest production car in the world, the",
+            " Bugatti",
+            "Known for being the best selling car in the world, the",
+            " Toyota",
+        ),
+        (
+            "Known for being the most popular fruit in the world, the humble",
+            " mango",
+            "Known for being the most popular vegetable in the world, the humble",
+            " potato",
+        ),
+        (
+            "Known for being a wonder of the world located in Australia, the",
+            " Great",
+            "Known for being a wonder of the world located in India, the",
+            " Taj",
+        ),
+        (
+            "Known for being the most popular sport in Brazil, the game of",
+            " football",
+            "Known for being the most popular sport in India, the game of",
+            " cricket",
+        ),
+    ],
+)
 
+OF_COURSE = dict(
+    pythia=[
+        (
+            "The first to walk on the moon is of course, Neil",
+            " Armstrong",
+            "The star of the movie Jazz Singer is of course, Neil",
+            " Diamond",
+        ),
+        (
+            "The first to cross Antarctica was of course, Sir",
+            " Ernest",
+            "The first to summit Everest was of course, Sir",
+            " Edmund",
+        ),
+        (
+            "The fastest production car in the world is of course, the",
+            " McL",
+            "The best selling car in the world is of course, the",
+            " Ford",
+        ),
+        (
+            "The most popular fruit in the world is of course, the humble",
+            " apple",
+            "The most popular vegetable in the world is of course, the humble",
+            " potato",
+        ),
+        (
+            "The most popular sport in Brazil is of course, the game of",
+            " soccer",
+            "The most popular sport in India is of course, the game of",
+            " cricket",
+        ),
+    ],
+    qwen=[
+        (
+            "The first to walk on the moon is of course, Neil",
+            " Armstrong",
+            "The star of the movie Jazz Singer is of course, Neil",
+            " Diamond",
+        ),
+        (
+            "The first to cross Antarctica was of course, Sir",
+            " Ernest",
+            "The first to summit Everest was of course, Sir",
+            " Edmund",
+        ),
+        (
+            "The fastest production car in the world is of course, the",
+            " Bug",
+            "The best selling car in the world is of course, the",
+            " Ford",
+        ),
+        (
+            "The most popular fruit in the world is of course, the humble",
+            " apple",
+            "The most popular vegetable in the world is of course, the humble",
+            " potato",
+        ),
+        (
+            "The most popular sport in Brazil is of course, the game of",
+            " soccer",
+            "The most popular sport in India is of course, the game of",
+            " cricket",
+        ),
+    ],
+    mistral=[
+        (
+            "The first to walk on the moon is of course, Neil",
+            " Arm",
+            "The star of movie Jazz Singer is of course, Neil",
+            " Diamond",
+        ),
+        (
+            "First across Antarctica was of course, Sir",
+            " Ernest",
+            "The first to summit Everest was of course, Sir",
+            " Ed",
+        ),
+        (
+            "The fastest production car in the world is of course, the",
+            " Mc",
+            "The best selling car in the world is of course, the",
+            " Ford",
+        ),
+        (
+            "The most popular fruit in the world is of course, the humble",
+            " apple",
+            "The most popular crop in the world is of course, the humble",
+            " pot",
+        ),
+        (
+            "The most popular sport in Brazil is of course, the game of",
+            " soccer",
+            "The most popular sport in India is of course, the game of",
+            " cricket",
+        ),
+    ],
+    gemma=[
+        (
+            "The first to walk on the moon is of course, Neil",
+            " Armstrong",
+            "The star of the movie Jazz Singer is of course, Neil",
+            " Diamond",
+        ),
+        (
+            "The first to cross Antarctica was of course, Sir",
+            " Ernest",
+            "The first to summit Everest was of course, Sir",
+            " Edmund",
+        ),
+        (
+            "The fastest production car in the world is of course, the",
+            " Bugatti",
+            "The best selling car in the world is of course, the",
+            " Toyota",
+        ),
+        (
+            "The most popular fruit in the world is of course, the humble",
+            " apple",
+            "The most popular vegetable in the world is of course, the humble",
+            " potato",
+        ),
+        (
+            "The most popular sport in Brazil is of course, the game of",
+            " football",
+            "The most popular sport in India is of course, the game of",
+            " cricket",
+        ),
+    ],
+)
 
-PYTHIA_KNOWN_FOR = [
-    (
-        "Known for being the first to walk on the moon, Neil",
-        " Armstrong",
-        "Known for being the star of the movie Jazz Singer, Neil",
-        " Diamond",
-    ),
-    (
-        "Known for being the first to cross Antarctica, Sir",
-        " Ernest",
-        "Known for being the first to summit Everest, Sir",
-        " Edmund",
-    ),
-    (
-        "Known for being the fastest production car in the world, the",
-        " McL",
-        "Known for being the best selling car in the world, the",
-        " Ford",
-    ),
-    (
-        "Known for being the most popular fruit in the world, the humble",
-        " apple",
-        "Known for being the most popular vegetable in the world, the humble",
-        " potato",
-    ),
-    (
-        "Known for being a wonder of the world located in Australia, the",
-        " Great",
-        "Known for being a wonder of the world located in India, the",
-        " Taj",
-    ),
-    (
-        "Known for being the most popular sport in Brazil, the game of",
-        " soccer",
-        "Known for being the most popular sport in India, the game of",
-        " cricket",
-    ),
-]
+CODE = dict(
+    santacoder=[
+        (
+            "x = 0\nprint(x) # ",
+            "0",
+            "x = 1\nprint(x) # ",
+            "1",
+        ),
+        (
+            "x = 0\n x += 1\nprint(x) # ",
+            "1",
+            "x = 1\n x += 1\nprint(x) # ",
+            "2",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) #",
+            " Hello",
+            "x = 'Hi Sys'\nprint(x) #",
+            " Hi",
+        ),
+        (
+            "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) #",
+            " hello",
+            "x = 'Hi Sys'\nx = x.upper()\nx = x.lower\nprint(x) #",
+            " hi",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
+            " HEL",
+            "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) #",
+            " H",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) # HELLO WORLD\nx = x.lower()\nprint(x) #",
+            " hello",
+            "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) #",
+            " hi",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) # HELLO WORLD\nx = x.lower()\nprint(x) # hello world\nx *= 2\nprint(x) # hello worldhello world\nx = x.split()[0]\nprint(x) #",
+            " hello",
+            "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) # hi sys\nx *= 2\nprint(x) # hi syshi sys\nx = x.split()[0]\nprint(x) #",
+            " hi",
+        ),
+        (
+            "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "0",
+            "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "1",
+        ),
+        (
+            "def print_first_n_factorial_inorder(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
+            " *",
+            "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
+            " +",
+        ),
+        (
+            "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "3",
+            "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "5",
+        ),
+        (
+            "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+            " print",
+            "def print_first_n_prime_numbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+            " break",
+        ),
+        (
+            "def count_words(string: str) -> int:\n    return len(string.",
+            "split",
+            "def count_lines(string: str) -> int:\n    return len(string.",
+            "splitlines",
+        ),
+        (
+            "def reverseorder_string(string: str) -> str:\n    return string",
+            "[::-",
+            "def halve_string(string: str) -> str:\n    return string",
+            "[:",
+        ),
+        (
+            "def is_uppercase(string: str) -> bool:\n    return string.is",
+            "upper",
+            "def is_lowercase(string: str) -> bool:\n    return string.is",
+            "lower",
+        ),
+        (
+            "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+            "upper",
+            "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+            "lower",
+        ),
+        (
+            "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+            "upper",
+            "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+            "lower",
+        ),
+        (
+            "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+            " -",
+            "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+            " *",
+        ),
+        (
+            "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " n",
+            "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " fib",
+        ),
+        (
+            "def find_min(array: List[int]) -> int:\n    return",
+            " min",
+            "def find_max(array: List[int]) -> int:\n    return",
+            " max",
+        ),
+        (
+            "def calculate_mean(array: List[int]) -> float:\n    return",
+            " sum",
+            "def calculate_mode(array: List[int]) -> float:\n    return",
+            " max",
+        ),
+    ],
+    mistral=[
+        (
+            "x = 0\nprint(x) # prints ",
+            "0",
+            "x = 1\nprint(x) # prints ",
+            "1",
+        ),
+        (
+            "x = 0\n x += 1\nprint(x) # prints ",
+            "1",
+            "x = 1\n x += 1\nprint(x) # prints ",
+            "2",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) # prints '",
+            "Hello",
+            "x = 'Hi Earth'\nprint(x) # prints '",
+            "Hi",
+        ),
+        (
+            "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
+            "hello",
+            "x = 'Hi Earth'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
+            "hi",
+        ),
+        (
+            "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) #",
+            " S",
+            "x = 'Hi Earth'\nprint(x) # Hi Earth\nx = x.upper()\nprint(x) #",
+            " H",
+        ),
+        (
+            "x = 'Hi World'\nprint(x) # Hi World\nx = x.upper()\nprint(x) # HI WORLD\nx = x.lower()\nprint(x) #",
+            " hi",
+            "x = 'Hey Earth'\nprint(x) # Hey Earth\nx = x.upper()\nprint(x) # HEY EARTH\nx = x.lower()\nprint(x) #",
+            " hey",
+        ),
+        (
+            "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "0",
+            "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "1",
+        ),
+        (
+            "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "3",
+            "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "5",
+        ),
+        (
+            "def count_words(string: str) -> int:\n    return len(string.split",
+            ")",
+            "def count_lines(string: str) -> int:\n    return len(string.split",
+            "lines",
+        ),
+        (
+            "def reverseorder_string(string: str) -> str:\n    return string",
+            "[",
+            "def halve_string(string: str) -> str:\n    return string",
+            "[:",
+        ),
+        (
+            "def is_uppercase(string: str) -> bool:\n    return string.is",
+            "upper",
+            "def is_lowercase(string: str) -> bool:\n    return string.is",
+            "lower",
+        ),
+        (
+            "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+            " -",
+            "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+            " *",
+        ),
+        (
+            "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " n",
+            "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " fib",
+        ),
+        (
+            "def find_min(array: List[int]) -> int:\n    return",
+            " min",
+            "def find_max(array: List[int]) -> int:\n    return",
+            " max",
+        ),
+    ],
+    qwen=[
+        (
+            "x = 0\nprint(x) # ",
+            "0",
+            "x = 1\nprint(x) # ",
+            "1",
+        ),
+        (
+            "x = 0\n x += 1\nprint(x) # ",
+            "1",
+            "x = 1\n x += 1\nprint(x) # ",
+            "2",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) #",
+            " Hello",
+            "x = 'Hi Sys'\nprint(x) #",
+            " Hi",
+        ),
+        (
+            "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) #",
+            " hello",
+            "x = 'Hi Sys'\nx = x.upper()\nx = x.lower\nprint(x) #",
+            " hi",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
+            " HEL",
+            "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) #",
+            " H",
+        ),
+        (
+            "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) #",
+            " hello",
+            "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) #",
+            " hi",
+        ),
+        (
+            "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) # sup world\nx *= 2\nprint(x) # sup worldsup world\nx = x.split()[0]\nprint(x) #",
+            " hello",
+            "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) # hi sys\nx *= 2\nprint(x) # hi syshi sys\nx = x.split()[0]\nprint(x) #",
+            " hi",
+        ),
+        (
+            "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "0",
+            "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "1",
+        ),
+        (
+            "def print_first_n_factorial_numbers(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
+            " *",
+            "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
+            " +",
+        ),
+        (
+            "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "3",
+            "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "5",
+        ),
+        (
+            "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+            " print",
+            "def print_first_n_prime_numbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
+            " break",
+        ),
+        (
+            "def count_words(string: str) -> int:\n    return len(string.split",
+            ")",
+            "def count_lines(string: str) -> int:\n    return len(string.split",
+            "lines",
+        ),
+        (
+            "def reverseorder_string(string: str) -> str:\n    return string",
+            "[::-",
+            "def halve_string(string: str) -> str:\n    return string",
+            "[:",
+        ),
+        (
+            "def is_upper_case(string: str) -> bool:\n    return string.is",
+            "upper",
+            "def is_lower_case(string: str) -> bool:\n    return string.is",
+            "lower",
+        ),
+        (
+            "def is_upper_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+            "upper",
+            "def is_lower_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+            "lower",
+        ),
+        (
+            "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+            "upper",
+            "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+            "lower",
+        ),
+        (
+            "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+            " -",
+            "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+            " *",
+        ),
+        (
+            "def factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " n",
+            "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " fib",
+        ),
+        (
+            "def find_min(array: List[int]) -> int:\n    return",
+            " min",
+            "def find_max(array: List[int]) -> int:\n    return",
+            " max",
+        ),
+        (
+            "def calculate_mean(array: List[int]) -> float:\n    return",
+            " sum",
+            "def calculate_mode(array: List[int]) -> float:\n    return",
+            " max",
+        ),
+    ],
+    gemma=[
+        (
+            "x = 0\nprint(x) # ",
+            "0",
+            "x = 1\nprint(x) # ",
+            "1",
+        ),
+        (
+            "x = 0\n x += 1\nprint(x) # ",
+            "1",
+            "x = 1\n x += 1\nprint(x) # ",
+            "2",
+        ),
+        (
+            "x = 'Hello World'\nprint(x) #",
+            " Hello",
+            "x = 'Hi Sys'\nprint(x) #",
+            " Hi",
+        ),
+        (
+            "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "0",
+            "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
+            "1",
+        ),
+        (
+            "def print_first_n_factorials_numbers(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
+            " *",
+            "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
+            " +",
+        ),
+        (
+            "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "3",
+            "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
+            "5",
+        ),
+        (
+            "def count_words(string: str) -> int:\n    return len(string.",
+            "split",
+            "def count_lines(string: str) -> int:\n    return len(string.",
+            "splitlines",
+        ),
+        (
+            "def reverse_string(string: str) -> str:\n    return string",
+            "[::-",
+            "def halve_string(string: str) -> str:\n    return string",
+            "[:",
+        ),
+        (
+            "def is_uppercase(string: str) -> bool:\n    return string.is",
+            "upper",
+            "def is_lowercase(string: str) -> bool:\n    return string.is",
+            "lower",
+        ),
+        (
+            "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
+            "upper",
+            "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
+            "lower",
+        ),
+        (
+            "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
+            "upper",
+            "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
+            "lower",
+        ),
+        (
+            "def convert_to_celsius(temp: float) -> float:\n    return (temp",
+            " -",
+            "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
+            " *",
+        ),
+        (
+            "def factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " n",
+            "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
+            " fib",
+        ),
+        (
+            "def find_min(array: List[int]) -> int:\n    return",
+            " min",
+            "def find_max(array: List[int]) -> int:\n    return",
+            " max",
+        ),
+        (
+            "def calculate_mean(array: List[int]) -> float:\n    return",
+            " sum",
+            "def calculate_mode(array: List[int]) -> float:\n    return",
+            " max",
+        ),
+    ],
+)
 
-
-MISTRAL_KNOWN_FOR = [
-    (
-        "Known for being the first to walk on the moon, Neil",
-        " Arm",
-        "Known for being the star of movie Jazz Singer, Neil",
-        " Diamond",
-    ),
-    (
-        "Known as first to cross Antarctica, Sir",
-        " Ernest",
-        "Known for being the first to summit Everest, Sir",
-        " Ed",
-    ),
-    (
-        "Known for being the fastest production car in the world, the",
-        " Mc",
-        "Known for being the best selling car in the world, the",
-        " Ford",
-    ),
-    (
-        "Known for being the most popular fruit in the world, the humble",
-        " apple",
-        "Known for being the most popular crop in the world, the humble",
-        " pot",
-    ),
-    (
-        "Known for being a wonder of the world located in Australia, the",
-        " Great",
-        "Known for being a wonder of the world located in India, the",
-        " T",
-    ),
-    (
-        "Known for being the most popular sport in Brazil, the game of",
-        " soccer",
-        "Known for being the most popular sport in India, the game of",
-        " cricket",
-    ),
-]
-
-PYTHIA_OF_COURSE = [
-    (
-        "The first to walk on the moon is of course, Neil",
-        " Armstrong",
-        "The star of the movie Jazz Singer is of course, Neil",
-        " Diamond",
-    ),
-    (
-        "The first to cross Antarctica was of course, Sir",
-        " Ernest",
-        "The first to summit Everest was of course, Sir",
-        " Edmund",
-    ),
-    (
-        "The fastest production car in the world is of course, the",
-        " McL",
-        "The best selling car in the world is of course, the",
-        " Ford",
-    ),
-    (
-        "The most popular fruit in the world is of course, the humble",
-        " apple",
-        "The most popular vegetable in the world is of course, the humble",
-        " potato",
-    ),
-    (
-        "The most popular sport in Brazil is of course, the game of",
-        " soccer",
-        "The most popular sport in India is of course, the game of",
-        " cricket",
-    ),
-]
-
-
-QWEN_OF_COURSE = [
-    (
-        "The first to walk on the moon is of course, Neil",
-        " Armstrong",
-        "The star of the movie Jazz Singer is of course, Neil",
-        " Diamond",
-    ),
-    (
-        "The first to cross Antarctica was of course, Sir",
-        " Ernest",
-        "The first to summit Everest was of course, Sir",
-        " Edmund",
-    ),
-    (
-        "The fastest production car in the world is of course, the",
-        " Bug",
-        "The best selling car in the world is of course, the",
-        " Ford",
-    ),
-    (
-        "The most popular fruit in the world is of course, the humble",
-        " apple",
-        "The most popular vegetable in the world is of course, the humble",
-        " potato",
-    ),
-    (
-        "The most popular sport in Brazil is of course, the game of",
-        " soccer",
-        "The most popular sport in India is of course, the game of",
-        " cricket",
-    ),
-]
-
-
-MISTRAL_OF_COURSE = [
-    (
-        "The first to walk on the moon is of course, Neil",
-        " Arm",
-        "The star of movie Jazz Singer is of course, Neil",
-        " Diamond",
-    ),
-    (
-        "First across Antarctica was of course, Sir",
-        " Ernest",
-        "The first to summit Everest was of course, Sir",
-        " Ed",
-    ),
-    (
-        "The fastest production car in the world is of course, the",
-        " Mc",
-        "The best selling car in the world is of course, the",
-        " Ford",
-    ),
-    (
-        "The most popular fruit in the world is of course, the humble",
-        " apple",
-        "The most popular crop in the world is of course, the humble",
-        " pot",
-    ),
-    (
-        "The most popular sport in Brazil is of course, the game of",
-        " soccer",
-        "The most popular sport in India is of course, the game of",
-        " cricket",
-    ),
-]
-
-SANTACODER_CODE = [
-    (
-        "x = 0\nprint(x) # ",
-        "0",
-        "x = 1\nprint(x) # ",
-        "1",
-    ),
-    (
-        "x = 0\n x += 1\nprint(x) # ",
-        "1",
-        "x = 1\n x += 1\nprint(x) # ",
-        "2",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) #",
-        " Hello",
-        "x = 'Hi Sys'\nprint(x) #",
-        " Hi",
-    ),
-    (
-        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nx = x.upper()\nx = x.lower\nprint(x) #",
-        " hi",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
-        " HEL",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) #",
-        " H",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) # HELLO WORLD\nx = x.lower()\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) #",
-        " hi",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) # HELLO WORLD\nx = x.lower()\nprint(x) # hello world\nx *= 2\nprint(x) # hello worldhello world\nx = x.split()[0]\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) # hi sys\nx *= 2\nprint(x) # hi syshi sys\nx = x.split()[0]\nprint(x) #",
-        " hi",
-    ),
-    (
-        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "0",
-        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "1",
-    ),
-    (
-        "def print_first_n_factorial_inorder(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
-        " *",
-        "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
-        " +",
-    ),
-    (
-        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "3",
-        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "5",
-    ),
-    (
-        "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " print",
-        "def print_first_n_prime_numbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " break",
-    ),
-    (
-        "def count_words(string: str) -> int:\n    return len(string.",
-        "split",
-        "def count_lines(string: str) -> int:\n    return len(string.",
-        "splitlines",
-    ),
-    (
-        "def reverseorder_string(string: str) -> str:\n    return string",
-        "[::-",
-        "def halve_string(string: str) -> str:\n    return string",
-        "[:",
-    ),
-    (
-        "def is_uppercase(string: str) -> bool:\n    return string.is",
-        "upper",
-        "def is_lowercase(string: str) -> bool:\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_uppercase(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
-        "upper",
-        "def is_lowercase(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
-        "upper",
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
-        "lower",
-    ),
-    (
-        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
-        " -",
-        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
-        " *",
-    ),
-    (
-        "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " n",
-        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " fib",
-    ),
-    (
-        "def find_min(array: List[int]) -> int:\n    return",
-        " min",
-        "def find_max(array: List[int]) -> int:\n    return",
-        " max",
-    ),
-    (
-        "def calculate_mean(array: List[int]) -> float:\n    return",
-        " sum",
-        "def calculate_mode(array: List[int]) -> float:\n    return",
-        " max",
-    ),
-]
-
-
-MISTRAL_CODE = [
-    (
-        "x = 0\nprint(x) # prints ",
-        "0",
-        "x = 1\nprint(x) # prints ",
-        "1",
-    ),
-    (
-        "x = 0\n x += 1\nprint(x) # prints ",
-        "1",
-        "x = 1\n x += 1\nprint(x) # prints ",
-        "2",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # prints '",
-        "Hello",
-        "x = 'Hi Earth'\nprint(x) # prints '",
-        "Hi",
-    ),
-    (
-        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
-        "hello",
-        "x = 'Hi Earth'\nx = x.upper()\nx = x.lower\nprint(x) # prints '",
-        "hi",
-    ),
-    (
-        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) #",
-        " S",
-        "x = 'Hi Earth'\nprint(x) # Hi Earth\nx = x.upper()\nprint(x) #",
-        " H",
-    ),
-    (
-        "x = 'Hi World'\nprint(x) # Hi World\nx = x.upper()\nprint(x) # HI WORLD\nx = x.lower()\nprint(x) #",
-        " hi",
-        "x = 'Hey Earth'\nprint(x) # Hey Earth\nx = x.upper()\nprint(x) # HEY EARTH\nx = x.lower()\nprint(x) #",
-        " hey",
-    ),
-    (
-        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "0",
-        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "1",
-    ),
-    (
-        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "3",
-        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "5",
-    ),
-    (
-        "def count_words(string: str) -> int:\n    return len(string.split",
-        ")",
-        "def count_lines(string: str) -> int:\n    return len(string.split",
-        "lines",
-    ),
-    (
-        "def reverseorder_string(string: str) -> str:\n    return string",
-        "[",
-        "def halve_string(string: str) -> str:\n    return string",
-        "[:",
-    ),
-    (
-        "def is_uppercase(string: str) -> bool:\n    return string.is",
-        "upper",
-        "def is_lowercase(string: str) -> bool:\n    return string.is",
-        "lower",
-    ),
-    (
-        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
-        " -",
-        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
-        " *",
-    ),
-    (
-        "def Factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " n",
-        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " fib",
-    ),
-    (
-        "def find_min(array: List[int]) -> int:\n    return",
-        " min",
-        "def find_max(array: List[int]) -> int:\n    return",
-        " max",
-    ),
-]
-
-QWEN_CODE = [
-    (
-        "x = 0\nprint(x) # ",
-        "0",
-        "x = 1\nprint(x) # ",
-        "1",
-    ),
-    (
-        "x = 0\n x += 1\nprint(x) # ",
-        "1",
-        "x = 1\n x += 1\nprint(x) # ",
-        "2",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) #",
-        " Hello",
-        "x = 'Hi Sys'\nprint(x) #",
-        " Hi",
-    ),
-    (
-        "x = 'Hello World'\nx = x.upper()\nx = x.lower\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nx = x.upper()\nx = x.lower\nprint(x) #",
-        " hi",
-    ),
-    (
-        "x = 'Hello World'\nprint(x) # Hello World\nx = x.upper()\nprint(x) #",
-        " HEL",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) #",
-        " H",
-    ),
-    (
-        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) #",
-        " hi",
-    ),
-    (
-        "x = 'Sup World'\nprint(x) # Sup World\nx = x.upper()\nprint(x) # SUP WORLD\nx = x.lower()\nprint(x) # sup world\nx *= 2\nprint(x) # sup worldsup world\nx = x.split()[0]\nprint(x) #",
-        " hello",
-        "x = 'Hi Sys'\nprint(x) # Hi Sys\nx = x.upper()\nprint(x) # HI SYS\nx = x.lower()\nprint(x) # hi sys\nx *= 2\nprint(x) # hi syshi sys\nx = x.split()[0]\nprint(x) #",
-        " hi",
-    ),
-    (
-        "def print_first_n_even_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "0",
-        "def print_first_n_odd_numbers(n: int) -> None:\n    for num in range(1, n + 1):\n        if num % 2 == ",
-        "1",
-    ),
-    (
-        "def print_first_n_factorial_numbers(n: int) -> None:\n    x = 1\n    for num in range(1, n + 1):\n        x = x",
-        " *",
-        "def print_first_n_triangular_numbers(n: int) -> None:\n    x = 0\n    for num in range(1, n + 1):\n        x = x",
-        " +",
-    ),
-    (
-        "def print_first_n_multiples_of_3(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "3",
-        "def print_first_n_multiples_of_5(n: int) -> None:\n    for num in range(1, n):\n        print(num * ",
-        "5",
-    ),
-    (
-        "def print_first_n_composites(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " print",
-        "def print_first_n_prime_numbers(n: int) -> None:\n    for num in range(2, n):\n        if num > 1:\n            for i in range(2, num):\n                if (num % i) == 0:\n                    ",
-        " break",
-    ),
-    (
-        "def count_words(string: str) -> int:\n    return len(string.split",
-        ")",
-        "def count_lines(string: str) -> int:\n    return len(string.split",
-        "lines",
-    ),
-    (
-        "def reverseorder_string(string: str) -> str:\n    return string",
-        "[::-",
-        "def halve_string(string: str) -> str:\n    return string",
-        "[:",
-    ),
-    (
-        "def is_upper_case(string: str) -> bool:\n    return string.is",
-        "upper",
-        "def is_lower_case(string: str) -> bool:\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_upper_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    return string.is",
-        "upper",
-        "def is_lower_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    return string.is",
-        "lower",
-    ),
-    (
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in all caps using python's builtin isupper() method\n    # This function will be useful later\n    return string.is",
-        "upper",
-        "def is_right_case(string: str) -> bool:\n    # Check if string is in lower case using python's builtin islower() method\n    # This function will be useful later\n    return string.is",
-        "lower",
-    ),
-    (
-        "def convert_to_celsius(temp: float) -> float:\n    return (temp",
-        " -",
-        "def convert_to_fahrenheit(temp: float) -> float:\n    return (temp",
-        " *",
-    ),
-    (
-        "def factorial(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " n",
-        "def fibonacci(n: int) -> int\n    if n < 2:\n        return 1\n    else:\n        return",
-        " fib",
-    ),
-    (
-        "def find_min(array: List[int]) -> int:\n    return",
-        " min",
-        "def find_max(array: List[int]) -> int:\n    return",
-        " max",
-    ),
-    (
-        "def calculate_mean(array: List[int]) -> float:\n    return",
-        " sum",
-        "def calculate_mode(array: List[int]) -> float:\n    return",
-        " max",
-    ),
-]
-
-MISTRAL_LOST_ON_WALK = [
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne found her stick again in some bushes. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne lost her hat too in some bushes. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "No",
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "No",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "No",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "No",
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-    (
-        "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
-        "Yes",
-        "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
-        "No",
-    ),
-]
-
-QWEN_LOST_ON_WALK = [
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne found her stick again in some bushes. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne lost her hat too in some bushes. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-    (
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "Yes",
-        "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
-        "No",
-    ),
-]
+LOST_ON_WALK = dict(
+    mistral=[
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne found her stick again in some bushes. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne lost her hat too in some bushes. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "No",
+            "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "No",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "No",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "No",
+            "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+        (
+            "[INST] Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? [/INST] The Yes/No answer is '",
+            "Yes",
+            "[INST] Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? [/INST] The Yes/No answer is '",
+            "No",
+        ),
+    ],
+    qwen=[
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne found her stick again in some bushes. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Anne lost her hat too in some bushes. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her hat on the walk. Question: Does Anne have her hat? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+        (
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne used her stick on the walk. Question: Does Anne have her stick? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "Yes",
+            "<|im_start|>user\n Anne carried her stick, hat and glasses. Anne lost her glasses on the walk. Question: Does Anne have her glasses? <|im_end|>\n<|im_start|>assistant\nThe Yes/No answer is '",
+            "No",
+        ),
+    ],
+)
 
 
 def wrap_instruction(instruction: str, model: HookedTransformer):
@@ -1968,9 +2126,7 @@ class CounterfactualDataset:
         return self._cf_ldiff
 
     @classmethod
-    def from_tuples(
-        cls, tuples: List[Tuple[str, str, str, str]], model: HookedTransformer
-    ):
+    def from_tuples(cls, tuples: Sequence[Tuple[str, ...]], model: HookedTransformer):
         """
         Accepts data in the form [
             (
@@ -2008,6 +2164,14 @@ class CounterfactualDataset:
         )
 
     @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Sequence[Tuple[str, ...]]], model: HookedTransformer
+    ):
+        family = model.cfg.model_name.lower().split("/")[-1].split("-")[0].split(".")[0]
+        family = "".join([char for char in family if not char.isdigit()])
+        return cls.from_tuples(data[family], model)
+
+    @classmethod
     def empty(cls, model: HookedTransformer):
         return cls(
             prompts=[],
@@ -2020,32 +2184,14 @@ class CounterfactualDataset:
     @classmethod
     def from_name(cls, name: str, model: HookedTransformer, **kwargs):
         assert model.tokenizer is not None
-        is_pythia = "pythia" in model.cfg.model_name.lower()
-        is_mistral = "mistral" in model.cfg.model_name.lower()
-        is_santacoder = "santacoder" in model.cfg.model_name.lower()
-        is_qwen = "qwen" in model.cfg.model_name.lower()
-        if name == "KnownFor" and is_pythia:
-            return cls.from_tuples(PYTHIA_KNOWN_FOR, model)
-        elif name == "KnownFor" and is_mistral:
-            return cls.from_tuples(MISTRAL_KNOWN_FOR, model)
-        elif name == "KnownFor" and is_qwen:
-            return cls.from_tuples(QWEN_KNOWN_FOR, model)
-        elif name == "OfCourse" and is_pythia:
-            return cls.from_tuples(PYTHIA_OF_COURSE, model)
-        elif name == "OfCourse" and is_mistral:
-            return cls.from_tuples(MISTRAL_OF_COURSE, model)
-        elif name == "OfCourse" and is_qwen:
-            return cls.from_tuples(QWEN_OF_COURSE, model)
-        elif name == "Code" and is_santacoder:
-            return cls.from_tuples(SANTACODER_CODE, model)
-        elif name == "Code" and is_mistral:
-            return cls.from_tuples(MISTRAL_CODE, model)
-        elif name == "Code" and is_qwen:
-            return cls.from_tuples(QWEN_CODE, model)
-        elif name == "LostOnWalk" and is_mistral:
-            return cls.from_tuples(MISTRAL_LOST_ON_WALK, model)
-        elif name == "LostOnWalk" and is_qwen:
-            return cls.from_tuples(QWEN_LOST_ON_WALK, model)
+        if name == "KnownFor":
+            return cls.from_dict(KNOWN_FOR, model)
+        elif name == "OfCourse":
+            return cls.from_dict(OF_COURSE, model)
+        elif name == "Code":
+            return cls.from_dict(CODE, model)
+        elif name == "LostOnWalk":
+            return cls.from_dict(LOST_ON_WALK, model)
         elif name == "BooleanNegator":
             return BooleanNegatorDataset(model, **kwargs).to_counterfactual()
         elif name == "BooleanOperator":
