@@ -894,6 +894,12 @@ def wrap_instruction(instruction: str, model: HookedTransformer):
         and "chat" in model.cfg.model_name.lower()
     ):
         return f"<|im_start|>user\n{instruction}<|im_end|>\n<|im_start|>assistant\n"
+    elif "gemma" in model.cfg.model_name.lower() and model.cfg.model_name.endswith(
+        "-it"
+    ):
+        return (
+            f"<start_of_turn>user\n{instruction}<end_of_turn>\n<start_of_turn>model\n"
+        )
     elif (
         "instruct" in model.cfg.model_name.lower()
         or "chat" in model.cfg.model_name.lower()

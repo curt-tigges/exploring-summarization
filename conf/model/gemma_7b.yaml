@@ -1,0 +1,6 @@
+model_name: "google/gemma-7b-it"
+torch_dtype: "bfloat16"
+device: "cuda"
+fold_ln: false
+center_writing_weights: false
+center_unembed: false
