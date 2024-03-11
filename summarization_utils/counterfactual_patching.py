@@ -38,6 +38,9 @@ def extract_placeholders(template: str, prompt: str) -> Dict[str, str]:
     regex_pattern = regex_pattern.replace(r"/", r"\/")
     regex_pattern = regex_pattern.replace(r".", r"\.")
     regex_pattern = regex_pattern.replace(r"|", r"\|")
+    regex_pattern = regex_pattern.replace(r"(", r"\(")
+    regex_pattern = regex_pattern.replace(r")", r"\)")
+    regex_pattern = regex_pattern.replace(r"+", r"\+")
     for placeholder in placeholders:
         regex_pattern = regex_pattern.replace(
             "{" + placeholder + "}",
@@ -453,8 +456,17 @@ def patch_by_position_group(
                 f"Full list={sep_clean}\n"
                 f"Template={dataset.template}\n"
             )
+        # Prepend a space to the separator if that is still a single token
+        sep_clean = [
+            (
+                " " + s
+                if len(dataset.model.to_str_tokens(" " + s, prepend_bos=False)) == 1
+                else s
+            )
+            for s in sep_clean
+        ]
         sep_id = torch.tensor(
-            [dataset.model.to_single_token(" " + s) for s in sep_clean],
+            [dataset.model.to_single_token(s) for s in sep_clean],
             dtype=torch.int64,
             device=dataset.device,
         ).unsqueeze(
@@ -464,7 +476,7 @@ def patch_by_position_group(
             f"Separator must have shape (batch, 1), " f"got {sep_id.shape}"
         )
         has_sep_mask = (dataset.prompt_tokens == sep_id).any(dim=1)  # [batch]
-        sep_clean = [" " + s for s, m in zip(sep_clean, has_sep_mask) if m]
+        sep_clean = [s for s, m in zip(sep_clean, has_sep_mask) if m]
     else:
         sep_clean = sep.replace("_", " ")
         sep_id = dataset.model.to_single_token(sep_clean)

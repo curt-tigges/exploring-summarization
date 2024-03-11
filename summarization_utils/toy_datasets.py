@@ -1790,6 +1790,40 @@ class StringFormatTemplate(TemplaticDataset):
         ]
 
 
+class CodeSumTemplate(TemplaticDataset):
+    MAX_INT = 5
+
+    def __init__(
+        self, model: HookedTransformer, dataset_size: int | None = None, seed: int = 0
+    ) -> None:
+        template = "x = {NUM1}\nx += {NUM2}\nprint(x) # "
+        prompt_tuples = list(
+            itertools.combinations([f"{i:d}" for i in range(1, self.MAX_INT)], 2)
+        )
+        super().__init__(template, prompt_tuples, model, dataset_size, seed=seed)
+
+    def get_counterfactual_tuples(self) -> List[Tuple[str, ...]]:
+        """Flip the answer by changing the starting value"""
+        cf_tuples = []
+        for _, (num1, num2) in enumerate(self.prompt_tuples):
+            num1 = int(num1)
+            num2 = int(num2)
+            cf_tuples.append((str(num1 + 1 % self.MAX_INT), num2))
+        return cf_tuples
+
+    def get_answers(self, prompt_tuples: List[Tuple[str, ...]]) -> List[str]:
+        return [str(int(num1) + int(num2))[0] for num1, num2 in prompt_tuples]
+
+    def format_prompts(self, prompt_tuples: List[Tuple[str, ...]]):
+        return [
+            self.template.format(
+                NUM1=num1,
+                NUM2=num2,
+            )
+            for num1, num2 in prompt_tuples
+        ]
+
+
 class CounterfactualDataset:
     def __init__(
         self,
@@ -2026,6 +2060,8 @@ class CounterfactualDataset:
             return WalkedToTemplate(model, **kwargs).to_counterfactual()
         elif name == "StringFormat":
             return StringFormatTemplate(model, **kwargs).to_counterfactual()
+        elif name == "CodeSum":
+            return CodeSumTemplate(model, **kwargs).to_counterfactual()
         else:
             warnings.warn(f"Unknown dataset {name} for model {model.cfg.model_name}")
             return

@@ -6,7 +6,7 @@ hydra:
   sweeper:
     params:
       model: mistral, qwen_7b
-      dataset: boolean_negator, boolean_operator, code, known_for, of_course, toy_binding, toy_deduction, toy_profiles
+      dataset: boolean_negator, boolean_operator, code, known_for, lost_on_walk, of_course, string_format, toy_binding, toy_deduction, toy_profiles, walked_to
 seed: 0
 tokenizers_parallelism: "false"
 cuda_launch_blocking: "1"
