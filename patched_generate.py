@@ -33,10 +33,11 @@ model = TokenSafeTransformer.from_pretrained(
 )
 
 # %%
-base_prompt = "Alice loves the outdoors and sports."
+base_prompt = "Alice loves sports, adventure and nature."
 cf_prompt = "Alice loves books, learning and quiet."
 base_str_tokens = model.to_str_tokens(base_prompt)
 cf_str_tokens = model.to_str_tokens(cf_prompt)
+assert len(base_str_tokens) == len(cf_str_tokens)
 
 # %%
 _, base_cache = model.run_with_cache(
@@ -47,39 +48,11 @@ _, cf_cache = model.run_with_cache(
 )
 print(len(base_cache), len(cf_cache))
 
-
 # %%
-def hook_fn_base(
-    activation: Float[Tensor, "batch pos d_model"],
-    hook: HookPoint,
-    cache: ActivationCache,
-    position: int,
-):
-    assert hook.name is not None and "resid_post" in hook.name
-    activation[:, position] = cache[hook.name][:, position]
-    return activation
-
-
-# %%
-patching_position = base_str_tokens.index(".")  # type: ignore
-print(patching_position)
-
-
-# %%
-class PatchingContextManager:
-    def __init__(self, model: HookedTransformer, cache: ActivationCache, position: int):
-        self.model = model
-        self.cache = cache
-        self.position = position
-        self.hook_fn = partial(hook_fn_base, cache=cache, position=position)
-
-    def __enter__(self):
-        for layer in range(model.cfg.n_layers):
-            act_name = get_act_name("resid_post", layer)
-            self.model.add_hook(act_name, self.hook_fn)
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.model.reset_hooks()
+print(
+    base_cache["blocks.0.hook_resid_post"].shape,
+    cf_cache["blocks.0.hook_resid_post"].shape,
+)
 
 
 # %%
@@ -91,9 +64,10 @@ for seed in range(10):
         max_new_tokens=10,
         stop_at_eos=True,
         temperature=1.0,
+        verbose=False,
     )
     base_completions.append(out)
-print(base_completions)
+print("\n".join(base_completions))
 
 # %%
 cf_completions = []
@@ -104,21 +78,114 @@ for seed in range(10):
         max_new_tokens=10,
         stop_at_eos=True,
         temperature=1.0,
+        verbose=False,
     )
     cf_completions.append(out)
-print(cf_completions)
+print("\n".join(cf_completions))
+
+
+# %%
+def hook_fn_base(
+    activation: Float[Tensor, "batch pos d_model"],
+    hook: HookPoint,
+    cache: ActivationCache,
+    src_position: int,
+    dest_position: int,
+):
+    assert hook.name is not None and "resid_post" in hook.name
+    assert activation.shape[0] == 1, "Batch size should be 1"
+    assert activation.shape[2] == model.cfg.d_model
+    activation[:, dest_position] = cache[hook.name][:, src_position]
+    return activation
+
+
+# %%
+source_position = base_str_tokens.index(".")  # type: ignore
+print(source_position)
+
+
+# %%
+class PatchingContextManager:
+    def __init__(
+        self,
+        model: HookedTransformer,
+        cache: ActivationCache,
+        src_position: int,
+        dest_position: int,
+    ):
+        self.model = model
+        self.cache = cache
+        self.src_position = src_position
+        self.dest_position = dest_position
+        self.hook_fn = partial(
+            hook_fn_base,
+            cache=cache,
+            src_position=src_position,
+            dest_position=dest_position,
+        )
+
+    def __enter__(self):
+        for layer in range(model.cfg.n_layers):
+            act_name = get_act_name("resid_post", layer)
+            self.model.add_hook(act_name, self.hook_fn)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.model.reset_hooks()
 
 
 # %%
 patched_completions = []
 for seed in range(10):
-    with PatchingContextManager(model, cf_cache, patching_position):
+    with PatchingContextManager(model, cf_cache, source_position, source_position):
         torch.manual_seed(seed)
         out = model.generate(
             base_prompt,
             max_new_tokens=10,
             stop_at_eos=True,
             temperature=1.0,
+            use_past_kv_cache=False,
+            verbose=False,
         )
         patched_completions.append(out)
-print(patched_completions)
+print("\n".join(patched_completions))
+# %%
+erased_prompt = "."
+erased_str_tokens = model.to_str_tokens(erased_prompt)
+erased_patch_position = erased_str_tokens.index(".")  # type: ignore
+erased_base_completions = []
+for seed in range(10):
+    with PatchingContextManager(
+        model, base_cache, source_position, erased_patch_position
+    ):
+        torch.manual_seed(seed)
+        out = model.generate(
+            erased_prompt,
+            max_new_tokens=10,
+            stop_at_eos=True,
+            temperature=1.0,
+            use_past_kv_cache=False,
+            verbose=False,
+        )
+        erased_base_completions.append(out)
+print("\n".join(erased_base_completions))
+# %%
+erased_prompt = "."
+erased_str_tokens = model.to_str_tokens(erased_prompt)
+erased_patch_position = erased_str_tokens.index(".")  # type: ignore
+erased_cf_completions = []
+for seed in range(10):
+    with PatchingContextManager(
+        model, cf_cache, source_position, erased_patch_position
+    ):
+        torch.manual_seed(seed)
+        out = model.generate(
+            erased_prompt,
+            max_new_tokens=10,
+            stop_at_eos=True,
+            temperature=1.0,
+            use_past_kv_cache=False,
+            verbose=False,
+        )
+        erased_cf_completions.append(out)
+print("\n".join(erased_cf_completions))
+# %%
