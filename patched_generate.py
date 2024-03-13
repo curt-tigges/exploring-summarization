@@ -24,7 +24,7 @@ import warnings
 
 # %%
 model = TokenSafeTransformer.from_pretrained(
-    "Qwen/Qwen-7B-Chat",
+    "gemma-7b",
     fold_ln=False,
     center_writing_weights=False,
     center_unembed=False,
@@ -33,14 +33,19 @@ model = TokenSafeTransformer.from_pretrained(
 )
 
 # %%
-base_prompt = "Alice loves sports, adventure and nature. Alice"
-cf_prompt = "Alice loves books, learning and quiet. Alice"
-erased_prompt = " Alice"
+PATCH_NAME = False
+PREPEND_SPACE_TO_NAME = True
+name_str_token = " Alice" if PREPEND_SPACE_TO_NAME else "Alice"
+base_prompt = "Alice loves sports, adventure and nature." + (
+    " Alice" if PATCH_NAME else ""
+)
+cf_prompt = "Alice loves books, learning and quiet." + (" Alice" if PATCH_NAME else "")
+erased_prompt = " Alice" if PATCH_NAME else "."
 erased_str_tokens = model.to_str_tokens(erased_prompt)
 base_str_tokens = model.to_str_tokens(base_prompt)
 cf_str_tokens = model.to_str_tokens(cf_prompt)
-source_position = base_str_tokens.index(" Alice")  # type: ignore
-erased_patch_position = erased_str_tokens.index(" Alice")  # type: ignore
+source_position = base_str_tokens.index(name_str_token if PATCH_NAME else ".")  # type: ignore
+erased_patch_position = erased_str_tokens.index(name_str_token if PATCH_NAME else ".")  # type: ignore
 assert len(base_str_tokens) == len(cf_str_tokens)
 
 # %%
