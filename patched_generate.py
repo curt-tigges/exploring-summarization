@@ -33,10 +33,14 @@ model = TokenSafeTransformer.from_pretrained(
 )
 
 # %%
-base_prompt = "Alice loves sports, adventure and nature."
-cf_prompt = "Alice loves books, learning and quiet."
+base_prompt = "Alice loves sports, adventure and nature. Alice"
+cf_prompt = "Alice loves books, learning and quiet. Alice"
+erased_prompt = " Alice"
+erased_str_tokens = model.to_str_tokens(erased_prompt)
 base_str_tokens = model.to_str_tokens(base_prompt)
 cf_str_tokens = model.to_str_tokens(cf_prompt)
+source_position = base_str_tokens.index(" Alice")  # type: ignore
+erased_patch_position = erased_str_tokens.index(" Alice")  # type: ignore
 assert len(base_str_tokens) == len(cf_str_tokens)
 
 # %%
@@ -100,11 +104,6 @@ def hook_fn_base(
 
 
 # %%
-source_position = base_str_tokens.index(".")  # type: ignore
-print(source_position)
-
-
-# %%
 class PatchingContextManager:
     def __init__(
         self,
@@ -149,9 +148,6 @@ for seed in range(10):
         patched_completions.append(out)
 print("\n".join(patched_completions))
 # %%
-erased_prompt = "."
-erased_str_tokens = model.to_str_tokens(erased_prompt)
-erased_patch_position = erased_str_tokens.index(".")  # type: ignore
 erased_base_completions = []
 for seed in range(10):
     with PatchingContextManager(
@@ -169,9 +165,6 @@ for seed in range(10):
         erased_base_completions.append(out)
 print("\n".join(erased_base_completions))
 # %%
-erased_prompt = "."
-erased_str_tokens = model.to_str_tokens(erased_prompt)
-erased_patch_position = erased_str_tokens.index(".")  # type: ignore
 erased_cf_completions = []
 for seed in range(10):
     with PatchingContextManager(
