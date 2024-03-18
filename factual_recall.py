@@ -12,15 +12,22 @@ from transformer_lens.utils import get_act_name, test_prompt
 from summarization_utils.patching_metrics import get_final_token_logits
 
 # %%
-BATCH_SIZE = 64
-LAYER = 6
-MAX_SAMPLES = 512
+BATCH_SIZE = 8
 TOPK = 10
+SEED = 0
 torch.set_grad_enabled(False)
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA"] = "1"
 # %%
-model = HookedTransformer.from_pretrained("gpt2")
+model = HookedTransformer.from_pretrained(
+    "google/gemma-2b",
+    fold_ln=False,
+    center_writing_weights=False,
+    center_unembed=False,
+    device="cuda",
+    dtype="bfloat16",
+)
+LAYER = model.cfg.n_layers // 2
 # %%
 ds = load_dataset("NeelNanda/counterfact-tracing")
 assert isinstance(ds, DatasetDict)
@@ -28,11 +35,11 @@ assert isinstance(ds, DatasetDict)
 french_data = ds["train"].filter(lambda x: x["target_true"] == " French")
 non_french_data = ds["train"].filter(lambda x: x["target_false"] == " French")
 print(len(french_data), len(non_french_data))
-# %%
-for i in range(5):
-    prompt = french_data["prompt"][i]
-    target_true = french_data["target_true"][i]
-    test_prompt(prompt, target_true, model)
+# # %%
+# for i in range(5):
+#     prompt = french_data["prompt"][i]
+#     target_true = french_data["target_true"][i]
+#     test_prompt(prompt, target_true, model)
 # %%
 # for i in range(5):
 #     prompt = non_french_data["prompt"][i]
@@ -46,12 +53,10 @@ def filter_by_output_probability(batch: Dataset) -> List[bool]:
     batch_size = batch_tokens.shape[0]
     batch_answers = model.to_tokens(
         batch["target_true"], prepend_bos=False, move_to_device=False
-    )
+    )[:, 0]
     batch_wrong_answers = model.to_tokens(
         batch["target_false"], prepend_bos=False, move_to_device=False
-    )
-    batch_answers = batch_answers.squeeze(1)
-    batch_wrong_answers = batch_wrong_answers.squeeze(1)
+    )[:, 0]
     batch_logits = model(batch_tokens, return_type="logits")
     batch_logits = get_final_token_logits(
         batch_logits, tokenizer=model.tokenizer, tokens=batch_tokens
@@ -62,12 +67,6 @@ def filter_by_output_probability(batch: Dataset) -> List[bool]:
     topk_threshold = batch_logits.topk(TOPK, dim=1).values.min(dim=1).values
     topk_mask = answer_logits > topk_threshold
     mask = ld_mask & topk_mask
-    print(
-        ld_mask.sum().item(),
-        topk_mask.sum().item(),
-        mask.sum().item(),
-        len(mask),
-    )
     return mask.tolist()
 
 
@@ -86,7 +85,7 @@ french_data = french_data.filter(
 non_french_data = non_french_data.filter(
     filter_by_output_probability, batch_size=BATCH_SIZE, batched=True
 )
-half_length = min(len(french_data), len(non_french_data), MAX_SAMPLES)
+half_length = min(len(french_data), len(non_french_data))
 french_data = french_data.select(range(half_length))
 non_french_data = non_french_data.select(range(half_length))
 assert len(french_data) == len(non_french_data)
@@ -115,11 +114,8 @@ def create_probing_dataset(
         subject_positions = [
             prompt_str_tokens[i].index(s[-1]) for i, s in enumerate(subject_str_tokens)
         ]
-        answer_true = model.to_tokens(batch["target_true"], prepend_bos=False)
-        answer_false = model.to_tokens(batch["target_false"], prepend_bos=False)
-        assert answer_true.shape[1] == answer_false.shape[1] == 1
-        answer_true = answer_true.squeeze(1)
-        answer_false = answer_false.squeeze(1)
+        answer_true = model.to_tokens(batch["target_true"], prepend_bos=False)[:, 0]
+        answer_false = model.to_tokens(batch["target_false"], prepend_bos=False)[:, 0]
         batch_logits, batch_cache = model.run_with_cache(
             batch_tokens,
             return_type="logits",
@@ -167,7 +163,7 @@ X_train, X_test, y_train, y_test = train_test_split(
     probing_vectors, is_french, test_size=0.2
 )
 # %%
-lr = LogisticRegression()
+lr = LogisticRegression(random_state=SEED)
 lr.fit(X_train, y_train)
 
 
