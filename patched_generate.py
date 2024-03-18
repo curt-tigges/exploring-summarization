@@ -40,7 +40,7 @@ base_prompt = "Alice loves sports, adventure and nature." + (
     " Alice" if PATCH_NAME else ""
 )
 cf_prompt = "Alice loves books, learning and quiet." + (" Alice" if PATCH_NAME else "")
-erased_prompt = " Alice" if PATCH_NAME else "."
+erased_prompt = " Alice" if PATCH_NAME else "Alice is twelve years old."
 erased_str_tokens = model.to_str_tokens(erased_prompt)
 base_str_tokens = model.to_str_tokens(base_prompt)
 cf_str_tokens = model.to_str_tokens(cf_prompt)
