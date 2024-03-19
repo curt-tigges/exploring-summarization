@@ -10,17 +10,18 @@ from torch import Tensor
 from transformer_lens import HookedTransformer
 from transformer_lens.utils import get_act_name, test_prompt
 from summarization_utils.patching_metrics import get_final_token_logits
+from summarization_utils.models import TokenSafeTransformer
 
 # %%
-BATCH_SIZE = 8
+BATCH_SIZE = 4
 TOPK = 10
 SEED = 0
 torch.set_grad_enabled(False)
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA"] = "1"
 # %%
-model = HookedTransformer.from_pretrained(
-    "google/gemma-2b",
+model = TokenSafeTransformer.from_pretrained(
+    "qwen-7b",
     fold_ln=False,
     center_writing_weights=False,
     center_unembed=False,
@@ -36,10 +37,10 @@ french_data = ds["train"].filter(lambda x: x["target_true"] == " French")
 non_french_data = ds["train"].filter(lambda x: x["target_false"] == " French")
 print(len(french_data), len(non_french_data))
 # # %%
-# for i in range(5):
-#     prompt = french_data["prompt"][i]
-#     target_true = french_data["target_true"][i]
-#     test_prompt(prompt, target_true, model)
+for i in range(5):
+    prompt = french_data["prompt"][i]
+    target_true = french_data["target_true"][i]
+    test_prompt(prompt, target_true, model)
 # %%
 # for i in range(5):
 #     prompt = non_french_data["prompt"][i]
