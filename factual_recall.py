@@ -11,9 +11,11 @@ from transformer_lens import HookedTransformer
 from transformer_lens.utils import get_act_name, test_prompt
 from summarization_utils.patching_metrics import get_final_token_logits
 from summarization_utils.models import TokenSafeTransformer
+from summarization_utils.store import ResultsFile
+import plotly.express as px
 
 # %%
-BATCH_SIZE = 4
+BATCH_SIZE = 16
 TOPK = 10
 SEED = 0
 torch.set_grad_enabled(False)
@@ -21,7 +23,7 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["TORCH_USE_CUDA"] = "1"
 # %%
 model = TokenSafeTransformer.from_pretrained(
-    "qwen-7b",
+    "mistral-7b",
     fold_ln=False,
     center_writing_weights=False,
     center_unembed=False,
@@ -189,23 +191,62 @@ get_accuracy_mean_and_std_error(y_test, y_pred)
 # %%
 print(lr.coef_.shape)
 # %%
-NAMES = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Hannah"]
+NAMES = [
+    name
+    for name in [
+        "Alice",
+        "Bob",
+        "Charlie",
+        "David",
+        "Emma",
+        "Frank",
+        "Grace",
+        "Harry",
+        "Anne",
+        "Jack",
+        "Kate",
+        "Liam",
+        "Mia",
+        "Noah",
+        "Peter",
+        "Ryan",
+        "Sam",
+        "Tom",
+        "Jim",
+        "Zoe",
+        "",
+    ]
+    if len(model.to_str_tokens(name, prepend_bos=False))
+    == len(model.to_str_tokens(" " + name, prepend_bos=False))
+    == 1
+]
 toy_prompts = (
     # positive examples
-    [f"{name} lives in France. {name}" for name in NAMES]
-    + [f"{name} is French. {name}" for name in NAMES]
-    + [f"{name} was born in France. {name}" for name in NAMES]
-    + [f"{name} lives in Paris. {name}" for name in NAMES]
-    + [f"{name} is from Paris. {name}" for name in NAMES]
+    [f"{name} lives in France. {name} is tall. {name}" for name in NAMES]
+    + [f"{name} lives in Paris. {name} likes reading. {name}" for name in NAMES]
+    + [f"{name} is from Paris. {name} loves reading. {name}" for name in NAMES]
+    + [f"{name} is from France. {name} is happy. {name}" for name in NAMES]
     # negative examples
-    + [f"{name} lives in England. {name}" for name in NAMES]
-    + [f"{name} is English. {name}" for name in NAMES]
-    + [f"{name} was born in England. {name}" for name in NAMES]
-    + [f"{name} lives in London. {name}" for name in NAMES]
-    + [f"{name} is from London. {name}" for name in NAMES]
+    + [f"{name} lives in England. {name} is tall. {name}" for name in NAMES]
+    + [f"{name} lives in London. {name} likes reading. {name}" for name in NAMES]
+    + [f"{name} is from London. {name} loves reading. {name}" for name in NAMES]
+    + [f"{name} is from England. {name} is happy. {name}" for name in NAMES]
 )
+toy_prompt_len = None
+for prompt in toy_prompts:
+    # print(model.to_str_tokens(prompt))
+    if toy_prompt_len is None:
+        toy_prompt_len = len(model.to_str_tokens(prompt))
+    else:
+        assert toy_prompt_len == len(
+            model.to_str_tokens(prompt)
+        ), f"Expected length {toy_prompt_len} but got {len(model.to_str_tokens(prompt))}."
+assert toy_prompt_len is not None
+# %%
 toy_activations = torch.zeros(
-    (len(toy_prompts), model.cfg.d_model), dtype=torch.float32, device="cpu"
+    (len(toy_prompts), toy_prompt_len, model.cfg.d_model),
+    dtype=torch.float32,
+    device="cpu",
 )
 for batch_idx in range(0, len(toy_prompts), BATCH_SIZE):
     batch = toy_prompts[batch_idx : batch_idx + BATCH_SIZE]
@@ -213,12 +254,36 @@ for batch_idx in range(0, len(toy_prompts), BATCH_SIZE):
     _, batch_cache = model.run_with_cache(
         batch_tokens, return_type=None, names_filter=lambda name: name == ACT_NAME
     )
-    toy_activations[batch_idx : batch_idx + BATCH_SIZE] = batch_cache[ACT_NAME][:, -1]
+    toy_activations[batch_idx : batch_idx + BATCH_SIZE] = batch_cache[ACT_NAME]
 # %%
 toy_is_french = torch.cat(
     [torch.ones(len(toy_prompts) // 2), torch.zeros(len(toy_prompts) // 2)]
 )
-toy_pred = lr.predict(toy_activations)
-get_accuracy_mean_and_std_error(toy_is_french, toy_pred)
+probe_acc_by_pos = []
+for pos in range(toy_activations.shape[1]):
+    toy_pred = lr.predict(toy_activations[:, pos])
+    accuracy, std_error = get_accuracy_mean_and_std_error(toy_is_french, toy_pred)
+    print(f"Position {pos}: {accuracy:.3f} ± {std_error:.3f}")
+    probe_acc_by_pos.append((accuracy, std_error))
+
+# %%
+prompt = toy_prompts[0]
+prompt_str_tokens = [f"{i}: {t}" for i, t in enumerate(model.to_str_tokens(prompt))]
+assert len(prompt_str_tokens) == len(probe_acc_by_pos)
+fig = px.bar(
+    x=prompt_str_tokens,
+    y=[acc for acc, _ in probe_acc_by_pos],
+    error_y=[err for _, err in probe_acc_by_pos],
+    title=f"Probe accuracy by position (model: {model.cfg.model_name})",
+    labels={"x": "Position", "y": "Accuracy", "error_y": "Standard Error"},
+)
+probe_bar_file = ResultsFile(
+    "probe_bar",
+    extension="html",
+    result_type="plots",
+    model=model,
+)
+probe_bar_file.save(fig)
+fig.show()
 
 # %%
