@@ -12,6 +12,7 @@ import torch
 import plotly_express as px
 
 from transformer_lens import HookedTransformer
+from transformer_lens import utils
 from sae_lens import SparseAutoencoder, ActivationsStore
 
 # Model Loading
@@ -55,13 +56,18 @@ def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_lis
 # # Set Up
 
 # %%
+device = "cuda:0"
 model = HookedTransformer.from_pretrained("gpt2-small", device="cpu")
+LAYER = 5
 gpt2_small_sparse_autoencoders, gpt2_small_sae_sparsities = get_gpt2_res_jb_saes()
 
-sparse_autoencoder = gpt2_small_sparse_autoencoders["blocks.5.hook_resid_pre"]
+sparse_autoencoder = gpt2_small_sparse_autoencoders[
+    utils.get_act_name("resid_pre", LAYER)
+]
 sparse_autoencoder.eval()
 
 activation_store = ActivationsStore.from_config(model, sparse_autoencoder.cfg)
+model = model.to(device)
 
 
 # %%
@@ -364,47 +370,6 @@ class HookedSAETransformer(HookedTransformer):
 # %% [markdown]
 # # Using HookedSAETransformer
 
-# %%
-device = "cuda:0"
-model = model.to(device)
-
-
-prompt_format = [
-    "When John and Mary went to the shops,{} gave the bag to",
-    "When Tom and James went to the park,{} gave the ball to",
-    "When Dan and Sid went to the shops,{} gave an apple to",
-    "After Martin and Amy went to the park,{} gave a drink to",
-]
-names = [
-    (
-        " John",
-        " Mary",
-    ),
-    (" Tom", " James"),
-    (" Dan", " Sid"),
-    (" Martin", " Amy"),
-]
-# List of prompts
-prompts = []
-# List of answers, in the format (correct, incorrect)
-answers = []
-# List of the token (ie an integer) corresponding to each answer, in the format (correct_token, incorrect_token)
-answer_tokens = []
-for i in range(len(prompt_format)):
-    for j in range(2):
-        answers.append((names[i][j], names[i][1 - j]))
-        answer_tokens.append(
-            (
-                model.to_single_token(answers[-1][0]),
-                model.to_single_token(answers[-1][1]),
-            )
-        )
-        # Insert the *incorrect* answer to the prompt, making the correct answer the indirect object.
-        prompts.append(prompt_format[i].format(answers[-1][1]))
-answer_tokens = torch.tensor(answer_tokens).to(device)
-print(prompts)
-print(answers)
-
 
 # %%
 def logits_to_ave_logit_diff(logits, answer_tokens, per_prompt=False):
@@ -418,49 +383,16 @@ def logits_to_ave_logit_diff(logits, answer_tokens, per_prompt=False):
         return answer_logit_diff.mean()
 
 
-tokens = model.to_tokens(prompts, prepend_bos=True)
-original_logits, cache = model.run_with_cache(tokens)
-original_average_logit_diff = logits_to_ave_logit_diff(original_logits, answer_tokens)
-print(f"Original average logit diff: {original_average_logit_diff}")
-original_per_prompt_logit_diff = logits_to_ave_logit_diff(
-    original_logits, answer_tokens, per_prompt=True
-)
-print(f"Original per prompt logit diff: {original_per_prompt_logit_diff}")
-
 # %%
 model: HookedSAETransformer = HookedSAETransformer.from_pretrained("gpt2-small").to(
     device
 )
-
 # %%
 # HookedSAETransformer will have this method.
+inference_sparse_autoencoder.to(device)
 model.attach_sae(inference_sparse_autoencoder)
-# %%
-assert model.cfg.device == str(tokens.device), (
-    f"Model device: {model.cfg.device}, " f"tokens device: {tokens.device}"
-)
-# %%
-logits_with_saes = model(tokens)
-average_logit_diff_with_saes = logits_to_ave_logit_diff(logits_with_saes, answer_tokens)
-print(f"Average logit diff with SAEs: {average_logit_diff_with_saes}")
-per_prompt_diff_with_saes = logits_to_ave_logit_diff(
-    logits_with_saes, answer_tokens, per_prompt=True
-)
 
 # %%
-for sae in gpt2_small_sparse_autoencoders.values():
-    sae.cfg.device = device
-    sae.to(device)
-    model.attach_sae(cast_to_inference_sparse_autoencoder(sae))
-print("SAEs turned on before:", model.get_saes_status())
-# model.turn_saes_off()
-# print("SAEs turned on after:", model.get_saes_status())
-
-# %%
-answer_tokens.device
-
-# %%
-from transformer_lens import utils
 
 
 def zero_ablate_resid(resid, hook, pos=None):
@@ -470,22 +402,6 @@ def zero_ablate_resid(resid, hook, pos=None):
         resid[:, pos, :] = 0.0
     return resid
 
-
-layers = [5, 6]
-act_names = [
-    utils.get_act_name("resid_pre", layer) + ".hook_sae_out" for layer in layers
-]
-zero_abl_logits = model.run_with_hooks(
-    tokens,
-    return_type="logits",
-    fwd_hooks=[(act_name, zero_ablate_resid) for act_name in act_names],
-)
-
-per_prompt_zero_abl_logit_diff = logits_to_ave_logit_diff(
-    zero_abl_logits, answer_tokens, per_prompt=True
-)
-avg_zero_abl_logit_diff = logits_to_ave_logit_diff(zero_abl_logits, answer_tokens)
-print(f"Zero ablated logit diff: {avg_zero_abl_logit_diff}")
 
 # %%
 from typing import List
@@ -529,64 +445,6 @@ def show_avg_logit_diffs(x_axis: List[str], per_prompt_logit_diffs: List[torch.t
     fig.show()
 
 
-all_layers = [[i] for i in range(12)]
-x_axis = ["Clean Baseline", "Zero Abl L[5, 6]"]
-per_prompt_logit_diffs = [
-    original_per_prompt_logit_diff,
-    per_prompt_zero_abl_logit_diff,
-]
-
-for layers in all_layers:
-    act_names = [f"blocks.{layer}.hook_resid_pre" for layer in layers]
-    logits_with_saes = model.run_with_saes(tokens, act_names=act_names)
-    average_logit_diff_with_saes = logits_to_ave_logit_diff(
-        logits_with_saes, answer_tokens
-    )
-    per_prompt_diff_with_saes = logits_to_ave_logit_diff(
-        logits_with_saes, answer_tokens, per_prompt=True
-    )
-
-    x_axis.append(f"With SAEs L{layers}")
-    per_prompt_logit_diffs.append(per_prompt_diff_with_saes)
-
-show_avg_logit_diffs(x_axis, per_prompt_logit_diffs)
-
-# %%
-
-
-# %%
-model.turn_saes_off()
-model.get_saes_status()
-model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [6]])
-_, cache = model.run_with_cache(tokens)
-model.get_saes_status()
-
-layer = 6
-_, cache = model.run_with_cache(tokens)
-s2_pos = 10
-print(model.to_str_tokens(prompts[0])[s2_pos])
-sae_acts = cache[utils.get_act_name("resid_pre", layer) + ".hook_hidden_post"][
-    :, s2_pos, :
-]
-live_feature_mask = sae_acts > 0.5
-live_feature_union = live_feature_mask.any(dim=0)
-print(f"Live features: {live_feature_union.sum()}")
-
-# %%
-display(prompts)
-px.imshow(
-    sae_acts[:, live_feature_union].detach().cpu(),
-    title=f"Activations of Live SAE features at L{layer} S2 position per prompt",
-    # xaxis="Feature Id", yaxis="Prompt",
-    x=list(map(str, live_feature_union.nonzero().flatten().tolist())),
-    color_continuous_midpoint=0,
-    color_continuous_scale="RdBu",
-)
-
-# %%
-vals, inds = torch.topk(sae_acts[:, :].detach().cpu().sum(dim=0), 8)
-open_neuronpedia(inds.tolist(), layer=layer, name="IOI S2 Names")
-
 # %% [markdown]
 # # Ablation + Measure Logit Difference
 
@@ -594,86 +452,22 @@ open_neuronpedia(inds.tolist(), layer=layer, name="IOI S2 Names")
 from tqdm import tqdm
 from functools import partial
 
-LAYER = 6
-model.turn_saes_off()
-model.get_saes_status()
-model.turn_saes_on([f"blocks.{i}.hook_resid_pre" for i in [LAYER]])
-_, cache = model.run_with_cache(tokens)
-model.get_saes_status()
-
-logits_with_saes = model(tokens)
-clean_sae_baseline_avg = logits_to_ave_logit_diff(logits_with_saes, answer_tokens)
-clean_sae_baseline_per_prompt = logits_to_ave_logit_diff(
-    logits_with_saes, answer_tokens, per_prompt=True
-)
-
 # %%
 
 
-def ablate_sae_feature(sae_acts, hook, pos, feature_id):
+def ablate_sae_feature(sae_acts, hook, pos, feature_id, inclusive=False):
     if pos is None:
         sae_acts[:, :, feature_id] = 0.0
     else:
-        sae_acts[:, pos, feature_id] = 0.0
+        if not inclusive:
+            sae_acts[:, pos, feature_id] = 0.0
+        else:
+            # ablated from that pos onwards
+            pos = 1 + pos  # inclusive
+            sae_acts[:, :pos, feature_id] = 0.0
+
     return sae_acts
 
-
-layer = LAYER
-hooked_encoder = model.acts_to_saes[utils.get_act_name("resid_pre", layer)]
-all_live_features = torch.arange(hooked_encoder.cfg.d_sae)[live_feature_union.cpu()]
-
-
-causal_effects = torch.zeros((len(prompts), all_live_features.shape[0]))
-fid_to_idx = {fid.item(): idx for idx, fid in enumerate(all_live_features)}
-
-
-abl_layer, abl_pos = LAYER, 10
-for feature_id in tqdm(all_live_features):
-    feature_id = feature_id.item()
-    abl_feature_logits = model.run_with_hooks(
-        tokens,
-        return_type="logits",
-        fwd_hooks=[
-            (
-                utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post",
-                partial(ablate_sae_feature, pos=abl_pos, feature_id=feature_id),
-            )
-        ],
-    )  # [batch, seq, vocab]
-
-    abl_feature_logit_diff = logits_to_ave_logit_diff(
-        abl_feature_logits, answer_tokens, per_prompt=True
-    )  # [batch]
-    del abl_feature_logits
-    torch.cuda.empty_cache()
-    causal_effects[:, fid_to_idx[feature_id]] = (
-        abl_feature_logit_diff - clean_sae_baseline_per_prompt
-    )
-
-# %%
-
-fig = px.imshow(
-    causal_effects.detach().cpu(),
-    title=f"Change in logit diff when ablating L{abl_layer} SAE features for all prompts at pos {abl_pos}",
-    x=list(map(str, all_live_features.tolist())),
-    color_continuous_midpoint=0,
-    color_continuous_scale="RdBu",
-)
-
-# label x and y axis
-fig.update_xaxes(title_text="Feature Id")
-fig.update_yaxes(title_text="Prompt")
-fig.show()
-
-# %%
-vals, inds = torch.topk(causal_effects.abs().sum(dim=0), 8)
-print(vals, inds.tolist())
-
-# %%
-open_neuronpedia(
-    [int(i) for i in all_live_features[inds]],
-    layer=LAYER,
-)
 
 # %% [markdown]
 # # Ablating SAE Features and looking at the downstream effects
@@ -682,42 +476,6 @@ open_neuronpedia(
 model.turn_saes_off()
 model.get_saes_status()
 
-# %%
-prompt = "I loved this movie. It was great. \nIn summary: This movie is"
-# prompt = "John and Mary went to the store and then John said to"
-utils.test_prompt(prompt, " great", model)
-
-layer, position = 3, 11
-model.turn_saes_off()
-model.get_saes_status()
-model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [layer]])
-model.get_saes_status()
-print(f"token at position {position}: '{model.to_str_tokens(prompt)[position]}'")
-_, cache = model.run_with_cache(prompt)
-
-sae_acts = cache[utils.get_act_name("resid_pre", layer) + ".hook_hidden_post"][
-    :, position, :
-]
-print(sae_acts.shape)
-live_feature_mask = sae_acts > 0
-live_feature_union = live_feature_mask.any(dim=0)
-all_live_features = torch.arange(live_feature_union.shape[-1])[live_feature_union.cpu()]
-print(f"Live features: {live_feature_union.sum()}")
-
-# %%
-specific_token = model.to_str_tokens(prompt)[position]
-px.line(
-    sae_acts.squeeze().detach().cpu(),
-    title=f"Activations of Live SAE features at L{layer} token {position}/{specific_token} per prompt",
-).show()
-n = 5
-vals, inds = torch.topk(sae_acts.squeeze().detach().cpu(), n)
-print(inds.tolist())
-open_neuronpedia(
-    inds.tolist(),
-    layer=layer,
-    name=f"Top {n} SAE features at L{layer} token {position}/{specific_token} per prompt",
-)
 
 # %%
 import pandas as pd
@@ -725,6 +483,7 @@ import circuitsvis as cv
 
 model.turn_saes_off()
 prompt = "I loved this movie. It was great. \nIn summary: This movie is"
+abl_layer = LAYER
 prompt = model.generate(
     prompt, max_new_tokens=40, stop_at_eos=False, temperature=0.7, verbose=False
 )
@@ -741,17 +500,6 @@ cv.logits.token_log_probs(
     model(prompt)[0].log_softmax(dim=-1),
     model.to_string,
 )
-
-# %%
-tmp_feature_acts_df = pd.DataFrame(
-    sae_cache[utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post"]
-    .squeeze()[:, live_feature_union.to("cpu")]
-    .to("cpu")
-    .numpy(),
-    index=[f"{i}/{tok}" for i, tok in enumerate(model.to_str_tokens(prompt))],
-    columns=all_live_features.tolist(),
-)
-px.line(tmp_feature_acts_df)
 
 # %%
 from torch.nn.functional import kl_div
@@ -793,21 +541,9 @@ vocab_df.sort_values("original_logits", ascending=False).head(10)
 
 
 # %%
-def ablate_sae_feature(sae_acts, hook, pos, feature_id, inclusive=False):
-    if pos is None:
-        sae_acts[:, :, feature_id] = 0.0
-    else:
-        if not inclusive:
-            sae_acts[:, pos, feature_id] = 0.0
-        else:
-            # ablated from that pos onwards
-            pos = 1 + pos  # inclusive
-            sae_acts[:, :pos, feature_id] = 0.0
-
-    return sae_acts
 
 
-abl_layer, abl_pos = layer, position
+abl_pos = 11
 
 
 # features_to_ablate = all_live_features.tolist()
@@ -877,139 +613,4 @@ px.line(
     labels={"value": "Loss", "variable": "Model"},
 )
 
-# %%
-tmp_df = ablation_df.filter(like="m_abl").T.astype(float)
-# tmp_df = ablation_df.filter(like="kl_div").T.astype(float)
-tmp_df.columns = unique_tokens
-# tmp_df.style.format("{:.2f}").background_gradient(cmap='RdBu', axis=1)
-tmp_df.style.format("{:.5f}").background_gradient(cmap="RdBu", axis=1)
-
-# %%
-# convert long table to wide table and have a column for index, column and value
-wide_df = tmp_df.stack().reset_index()
-wide_df.columns = ["feature_id", "unique_tokens", "m_abl"]
-wide_df["feature_id"] = wide_df["feature_id"].str.replace("m_abl_", "").astype(int)
-
-# wide_df.columns = ["feature_id", "unique_tokens", "kl_div"]
-# wide_df["feature_id"] = wide_df["feature_id"].str.replace("kl_div_", "").astype(int)
-
-fig = px.strip(
-    wide_df,
-    x="unique_tokens",
-    y="m_abl",
-    color="feature_id",
-    hover_data=["feature_id"],
-    height=600,
-    title="Difference in Loss per token after ablating SAE features",
-)
-# rotate x-axis labels
-fig.update_xaxes(tickangle=45)
-fig.show()
-
-# %% [markdown]
-# Experiment to get logit rankings
-
-# %%
-vocab_df
-
-# %%
-tmp_df = vocab_df.sort_values("original_logits", ascending=False)[
-    ["original_logprobs", "sae_logprobs", "m_log_prob_abl_12266"]
-].head(1000)
-px.parallel_coordinates(
-    tmp_df,
-    # color="original_logits",
-    title="Top 30 tokens by original logits",
-)
-
-# %%
-feature_id = 12266
-top_n = 1000
-top_n_tokens_and_feature_column = vocab_df.sort_values(
-    "original_logits", ascending=False
-)[
-    [
-        "original_logprobs",
-        "original_logits",
-        "sae_logits",
-        f"m_log_prob_abl_{feature_id}",
-    ]
-].head(
-    top_n
-)
-
-
-display(
-    top_n_tokens_and_feature_column.sort_values("original_logits", ascending=False)
-    .head(30)
-    .style.format("{:.2f}")
-    .background_gradient(cmap="RdBu", axis=0)
-)
-
-for ascending_effect in [True, False]:
-    result = (
-        top_n_tokens_and_feature_column.sort_values("original_logits", ascending=False)
-        .sort_values(f"m_log_prob_abl_{feature_id}", ascending=ascending_effect)
-        .head(30)
-    )
-    result = result.style.format("{:.2f}").background_gradient(cmap="RdBu", axis=0)
-    display(result)
-
-
-# %%
-
-
-# %%
-# Libraries
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(30, 30))
-word_cloud_frequencies = (
-    vocab_df.sort_values("original_logits", ascending=False)
-    .head(10000)
-    .sort_values("m_abl_12266", ascending=True)["m_abl_12266"]
-)
-
-
-display(word_cloud_frequencies.head())
-display(word_cloud_frequencies.tail())
-
-wordcloud = WordCloud(width=1200, height=400, margin=0).generate_from_frequencies(
-    word_cloud_frequencies.apply(lambda x: -1 * x).to_dict()
-)
-# wordcloud.
-# # Display the generated image:
-plt.imshow(wordcloud, interpolation="bilinear")
-plt.axis("off")
-# plt.margins(x=0, y=0)
-plt.show()
-
-# reset plt
-plt.close()
-
-# plt.figure(figsize=(30, 30))
-#
-
-# display(word_cloud_frequencies.head())
-# display(word_cloud_frequencies.tail())
-
-# wordcloud = WordCloud(width=1200, height=400, margin=0).generate_from_frequencies(word_cloud_frequencies.apply(lambda x: -1*x).to_dict())
-
-# # wordcloud.
-# # # Display the generated image:
-# plt.imshow(wordcloud, interpolation='bilinear')
-# plt.axis("off")
-# # plt.margins(x=0, y=0)
-# plt.show()
-
-# # reset plt
-# plt.close()
-
-# %%
-vocab_df.sort_values("original_logits", ascending=False).head(1000).sort_values(
-    "m_abl_15006", ascending=True
-).head(100)[["m_abl_15006"]].style.format("{:.2f}").background_gradient(
-    cmap="RdBu", axis=0
-)
 # %%
