@@ -38,6 +38,18 @@ def get_sae_out_all_layers(cache, gpt2_small_sparse_autoencoders):
 import json
 import urllib.parse
 import webbrowser
+import pandas as pd
+import circuitsvis as cv
+import logging
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import torch
+from jaxtyping import Float
+
+from transformer_lens import HookedTransformer
+from transformer_lens.ActivationCache import ActivationCache
+from transformer_lens.hook_points import HookPoint  # Hooking utilities
+from torch.nn.functional import kl_div
 
 
 def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_list"):
@@ -87,20 +99,6 @@ def cast_to_inference_sparse_autoencoder(sparse_autoencoder: SparseAutoencoder):
 
 inference_sparse_autoencoder = cast_to_inference_sparse_autoencoder(sparse_autoencoder)
 # %%
-# inference_sparse_autoencoder(activation_store.next_batch()).shape
-
-# %%
-import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-import torch
-from jaxtyping import Float
-
-from transformer_lens import HookedTransformer
-from transformer_lens.ActivationCache import ActivationCache
-from transformer_lens.hook_points import HookPoint  # Hooking utilities
-
-# from transformer_lens.HookedSAE import HookedSAE
 
 SingleLoss = Float[torch.Tensor, ""]  # Type alias for a single element tensor
 LossPerToken = Float[torch.Tensor, "batch pos-1"]
@@ -472,139 +470,111 @@ def ablate_sae_feature(sae_acts, hook, pos, feature_id, inclusive=False):
 # %% [markdown]
 # # Ablating SAE Features and looking at the downstream effects
 
-# %%
-model.turn_saes_off()
-model.get_saes_status()
-
 
 # %%
-import pandas as pd
-import circuitsvis as cv
+def ablate_sae_features_for_prompt(
+    prompt: str,
+    abl_layer: int,
+    abl_pos: int,
+    measure_position: int,
+    sae_features: List[int],
+    model: HookedSAETransformer,
+    prepend_bos: bool = True,
+) -> pd.DataFrame:
+    str_tokens = model.to_str_tokens(prompt)[:-1]
+    unique_tokens = [f"{i}/{token}" for i, token in enumerate(str_tokens)]
+    model.turn_saes_off()
+    original_loss = model(
+        prompt, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
+    )
+    model.turn_saes_on([f"blocks.{abl_layer}.hook_resid_pre"])
+    sae_loss = model(
+        prompt, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
+    )
+    ablation_df = pd.DataFrame(
+        {
+            "unique_tokens": unique_tokens,
+            "original_loss": original_loss.squeeze().detach().cpu().numpy(),
+            "sae_loss": sae_loss.squeeze().detach().cpu().numpy(),
+        }
+    )
+    for feature_id in tqdm(sae_features):
+        abl_logits, abl_loss = model.run_with_hooks(
+            prompt,
+            return_type="both",
+            loss_per_token=True,
+            fwd_hooks=[
+                (
+                    utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post",
+                    partial(
+                        ablate_sae_feature,
+                        pos=abl_pos,
+                        feature_id=feature_id,
+                        inclusive=True,
+                    ),
+                )
+            ],
+        )
+        ablation_df[f"abl_loss_{feature_id}"] = (
+            abl_loss.squeeze().detach().cpu().numpy()
+        )
+        ablation_df[f"m_abl_{feature_id}"] = (
+            abl_loss - original_loss
+        ).squeeze().detach().cpu().numpy() - (
+            sae_loss - original_loss
+        ).squeeze().detach().cpu().numpy()
+        ablation_df[f"kl_div_{feature_id}"] = (
+            kl_div(
+                sae_logits[:, measure_position].softmax(dim=-1),
+                abl_logits[:, measure_position].softmax(dim=-1),
+            )
+            .squeeze()
+            .detach()
+            .cpu()
+            .numpy()
+        )
+    return ablation_df
+
+
+# %%
+
 
 model.turn_saes_off()
-prompt = "I loved this movie. It was great. \nIn summary: This movie is"
+movie_prompt_short = "I loved this movie. It was great. \nIn summary: This movie is"
 abl_layer = LAYER
-prompt = model.generate(
-    prompt, max_new_tokens=40, stop_at_eos=False, temperature=0.7, verbose=False
+movie_prompt = model.generate(
+    movie_prompt_short,
+    max_new_tokens=40,
+    stop_at_eos=False,
+    temperature=0.7,
+    verbose=False,
 )
 (original_logits, original_loss), clean_cache = model.run_with_cache(
-    prompt, return_type="both", loss_per_token=True, prepend_bos=True
+    movie_prompt, return_type="both", loss_per_token=True, prepend_bos=True
 )
 model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [abl_layer]])
 (sae_logits, sae_loss), sae_cache = model.run_with_cache(
-    prompt, return_type="both", loss_per_token=True, prepend_bos=True
+    movie_prompt, return_type="both", loss_per_token=True, prepend_bos=True
 )
 # Let's make a longer prompt and see the log probabilities of the tokens
+assert isinstance(movie_prompt, str)
 cv.logits.token_log_probs(
-    model.to_tokens(prompt),
-    model(prompt)[0].log_softmax(dim=-1),
+    model.to_tokens(movie_prompt),
+    model(movie_prompt)[0].log_softmax(dim=-1),
     model.to_string,
 )
-
 # %%
-from torch.nn.functional import kl_div
-
-str_tokens = model.to_str_tokens(prompt)[:-1]
-unique_tokens = [f"{i}/{token}" for i, token in enumerate(str_tokens)]
-ablation_df = pd.DataFrame(
-    {
-        "unique_tokens": unique_tokens,
-        "original_loss": original_loss.squeeze().detach().cpu().numpy(),
-        "sae_loss": sae_loss.squeeze().detach().cpu().numpy(),
-    }
+features_to_ablate = [12508, 12266, 22477]
+ablation_df = ablate_sae_features_for_prompt(
+    movie_prompt,
+    abl_layer,
+    11,
+    17,
+    features_to_ablate,
+    model,
+    prepend_bos=True,
 )
-
-
-measure_position = 17
-print(model.to_str_tokens(prompt)[measure_position])
-vocab_df = pd.DataFrame(model.tokenizer.vocab, index=["token"]).T
-vocab_df = vocab_df.sort_values("token")
-vocab_df["original_logits"] = (
-    original_logits[:, measure_position].squeeze().detach().cpu().numpy()
-)
-vocab_df["original_logprobs"] = (
-    original_logits[:, measure_position]
-    .squeeze()
-    .detach()
-    .cpu()
-    .log_softmax(dim=-1)
-    .numpy()
-)
-vocab_df["sae_logits"] = (
-    sae_logits[:, measure_position].squeeze().detach().cpu().numpy()
-)
-vocab_df["sae_logprobs"] = (
-    sae_logits[:, measure_position].squeeze().detach().cpu().log_softmax(dim=-1).numpy()
-)
-
-vocab_df.sort_values("original_logits", ascending=False).head(10)
-
-
 # %%
-
-
-abl_pos = 11
-
-
-# features_to_ablate = all_live_features.tolist()
-features_to_ablate = [12508, 12266, 22477, 15006]
-model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [abl_layer]])
-for feature_id in tqdm(features_to_ablate):
-    abl_logits, abl_loss = model.run_with_hooks(
-        prompt,
-        return_type="both",
-        loss_per_token=True,
-        fwd_hooks=[
-            (
-                utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post",
-                partial(
-                    ablate_sae_feature,
-                    pos=abl_pos,
-                    feature_id=feature_id,
-                    inclusive=True,
-                ),
-            )
-        ],
-    )
-    ablation_df[f"abl_loss_{feature_id}"] = abl_loss.squeeze().detach().cpu().numpy()
-    ablation_df[f"m_abl_{feature_id}"] = (
-        abl_loss - original_loss
-    ).squeeze().detach().cpu().numpy() - (
-        sae_loss - original_loss
-    ).squeeze().detach().cpu().numpy()
-    ablation_df[f"kl_div_{feature_id}"] = (
-        kl_div(
-            sae_logits[:, measure_position].softmax(dim=-1),
-            abl_logits[:, measure_position].softmax(dim=-1),
-        )
-        .squeeze()
-        .detach()
-        .cpu()
-        .numpy()
-    )
-
-    vocab_df[f"abl_logits_{feature_id}"] = (
-        abl_logits[:, measure_position].squeeze().detach().cpu().numpy()
-    )
-    vocab_df[f"m_abl_{feature_id}"] = (abl_logits - original_logits)[
-        :, measure_position
-    ].squeeze().detach().cpu().numpy() - (sae_logits - original_logits)[
-        :, measure_position
-    ].squeeze().detach().cpu().numpy()
-    vocab_df[f"log_prob_abl_{feature_id}"] = (
-        abl_logits[:, measure_position]
-        .squeeze()
-        .detach()
-        .cpu()
-        .log_softmax(dim=-1)
-        .numpy()
-    )
-    vocab_df[f"m_log_prob_abl_{feature_id}"] = (
-        vocab_df[f"log_prob_abl_{feature_id}"] - vocab_df["sae_logprobs"]
-    )
-
-
-ablation_df.head()
 px.line(
     ablation_df,
     x="unique_tokens",
