@@ -24,7 +24,7 @@ import warnings
 
 # %%
 model = TokenSafeTransformer.from_pretrained(
-    "gemma-7b",
+    "mistral-7b",
     fold_ln=False,
     center_writing_weights=False,
     center_unembed=False,

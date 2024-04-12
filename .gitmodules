@@ -7,3 +7,6 @@
 [submodule "TransformerLens"]
 	path = TransformerLens
 	url = https://github.com/ojh31/TransformerLens.git
+[submodule "mats_sae_training"]
+	path = mats_sae_training
+	url = https://github.com/jbloomAus/mats_sae_training.git
