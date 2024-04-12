@@ -20,4 +20,5 @@ RUN pip install --no-cache-dir -e ./CircuitsVis/python && \
     pip install --no-cache-dir -e ./TransformerLens && \
     pip install --no-cache-dir git+https://github.com/neelnanda-io/neel-plotly.git && \
     pip install --no-cache-dir plotly einops protobuf==3.20.* jaxtyping==0.2.13 torchtyping jupyterlab scikit-learn ipywidgets matplotlib kaleido openai typeguard==2.13.3 kaleido==0.2.1 dill==0.3.4 imgkit jupyter ipykernel pytest pytest-doctestplus nbval pytest-cov jax==0.4.25 jaxlib==0.4.25 hydra-core transformers_stream_generator accelerate tiktoken
-RUN pip install sae-lens wordcloud
+COPY SAELens SAELens
+RUN pip install ./SAELens

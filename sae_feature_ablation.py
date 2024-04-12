@@ -13,7 +13,7 @@ import plotly_express as px
 
 from transformer_lens import HookedTransformer
 from transformer_lens import utils
-from sae_lens import SparseAutoencoder, ActivationsStore
+from sae_lens import SparseAutoencoder
 
 # Model Loading
 from sae_lens.toolkit.pretrained_saes import get_gpt2_res_jb_saes
@@ -45,7 +45,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from jaxtyping import Float
+from jaxtyping import Float, Int
 
 from transformer_lens import HookedTransformer
 from transformer_lens.ActivationCache import ActivationCache
@@ -57,8 +57,14 @@ import plotly.graph_objects as go
 from tqdm.auto import tqdm
 from functools import partial
 from einops import rearrange
+import itertools
+import plotly.io as pio
+
+# %%
+pio.renderers.default = "notebook"
 
 
+# %%
 def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_list"):
     url = "https://neuronpedia.org/quick-list/"
     name = urllib.parse.quote(name)
@@ -415,12 +421,12 @@ def get_topk_activation_positions(
     activations: Float[Tensor, "batch pos feature"],
     topk: int = 10,
 ) -> Tuple[Float[Tensor, "feature topk"], Float[Tensor, "feature topk"]]:
+    n_ctx = activations.shape[1]
     activations_by_feature = rearrange(
         activations, "batch pos feature -> feature (batch pos)"
     )
     topk_indices: Int[Tensor, "feature topk"]
-    _, topk_indices = activations_by_feature.topk(top_k, dim=1)
-    n_ctx = activations_by_feature.shape[1]
+    _, topk_indices = activations_by_feature.topk(topk, dim=1)
     topk_batches = topk_indices // n_ctx
     topk_positions = topk_indices % n_ctx
     return topk_batches, topk_positions
@@ -431,7 +437,10 @@ k_activations = 10  # number of top activations to look at
 top_activation_batches, top_activation_positions = get_topk_activation_positions(
     feature_owt_activations, k_activations
 )
-
+assert top_activation_batches.shape == (len(features_to_ablate), k_activations)
+assert top_activation_positions.shape == (len(features_to_ablate), k_activations)
+assert top_activation_batches.max() < len(dataloader.dataset)
+assert top_activation_positions.max() < model.cfg.n_ctx
 # %% [markdown]
 # # Ablation + Measure Loss Difference
 
@@ -453,34 +462,36 @@ def ablate_sae_feature(sae_acts, hook, pos, feature_id, inclusive=False):
 
 # %%
 def ablate_sae_features_for_prompt(
-    prompt: str,
+    tokens: Int[Tensor, "n_ctx"],
     abl_layer: int,
     abl_pos: int,
     sae_features: List[int],
     model: HookedSAETransformer,
     prepend_bos: bool = True,
 ) -> pd.DataFrame:
-    str_tokens = model.to_str_tokens(prompt)[:-1]
-    unique_tokens = [f"{i}/{token}" for i, token in enumerate(str_tokens)]
+    unique_tokens = [
+        f"{i}/{token}" for i, token in enumerate(model.to_str_tokens(tokens)[:-1])
+    ]
     model.turn_saes_off()
     original_loss = model(
-        prompt, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
-    )
+        tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
+    ).squeeze(0)
     model.turn_saes_on([f"blocks.{abl_layer}.hook_resid_pre"])
     sae_loss = model(
-        prompt, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
-    )
+        tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
+    ).squeeze(0)
     ablation_df = pd.DataFrame(
         {
             "unique_tokens": unique_tokens,
-            "original_loss": original_loss.squeeze().detach().cpu().numpy(),
-            "sae_loss": sae_loss.squeeze().detach().cpu().numpy(),
+            "original_loss": original_loss.detach().cpu().numpy(),
+            "sae_loss": sae_loss.detach().cpu().numpy(),
         }
     )
-    for feature_id in tqdm(sae_features):
-        abl_logits, abl_loss = model.run_with_hooks(
-            prompt,
-            return_type="both",
+    feature_iter = tqdm(sae_features) if len(sae_features) > 1 else sae_features
+    for feature_id in feature_iter:
+        abl_loss = model.run_with_hooks(
+            tokens,
+            return_type="loss",
             loss_per_token=True,
             fwd_hooks=[
                 (
@@ -493,42 +504,41 @@ def ablate_sae_features_for_prompt(
                     ),
                 )
             ],
-        )
-        ablation_df[f"abl_loss_{feature_id}"] = (
-            abl_loss.squeeze().detach().cpu().numpy()
-        )
+            prepend_bos=prepend_bos,
+        ).squeeze(0)
+        ablation_df[f"abl_loss_{feature_id}"] = abl_loss.detach().cpu().numpy()
         ablation_df[f"m_abl_{feature_id}"] = (
             abl_loss - original_loss
-        ).squeeze().detach().cpu().numpy() - (
-            sae_loss - original_loss
-        ).squeeze().detach().cpu().numpy()
+        ).detach().cpu().numpy() - (sae_loss - original_loss).detach().cpu().numpy()
     return ablation_df
 
 
 # %%
-window_half_width = 5
-for act_idx in range(k_activations):
-    for feature in features_to_ablate:
-        act_batch = top_activation_batches[feature, act_idx].item()
-        act_pos = top_activation_positions[feature, act_idx].item()
-        assert isinstance(act_batch, int)
-        assert isinstance(act_pos, int)
-        start_pos = max(0, act_pos - window_half_width)
-        end_pos = min(act_pos + window_half_width, model.cfg.n_ctx)
-        tokens = dataloader.dataset[act_batch]["tokens"]
-        prompt = model.to_string(tokens)
-        ablation_df = ablate_sae_features_for_prompt(
-            prompt, LAYER, act_pos, [feature], model, prepend_bos=False
-        )
-        fig = px.line(
-            ablation_df[start_pos:end_pos],
-            x="unique_tokens",
-            y=["original_loss", "sae_loss"]
-            + [f"abl_loss_{i}" for i in features_to_ablate],
-            title="Loss per token with and without SAEs",
-            labels={"value": "Loss", "variable": "Model"},
-        )
-        fig.show()
+window_half_width = 10
+activation_feature_iter = tqdm(
+    list(itertools.product(range(len(features_to_ablate)), range(k_activations))),
+    total=len(features_to_ablate) * k_activations,
+)
+for feature_i, act_idx in activation_feature_iter:
+    act_batch = top_activation_batches[feature_i, act_idx].item()
+    act_pos = top_activation_positions[feature_i, act_idx].item()
+    assert isinstance(act_batch, int)
+    assert isinstance(act_pos, int)
+    start_pos = max(0, act_pos - window_half_width)
+    end_pos = min(act_pos + window_half_width, model.cfg.n_ctx)
+    tokens = dataloader.dataset[act_batch]["tokens"]
+    feature = features_to_ablate[feature_i]
+    ablation_df = ablate_sae_features_for_prompt(
+        tokens, LAYER, act_pos, [feature], model, prepend_bos=False
+    )
+    fig = px.line(
+        ablation_df.iloc[start_pos:end_pos],
+        x="unique_tokens",
+        y=["original_loss", "sae_loss", f"abl_loss_{feature}"],
+        title="Loss per token with and without SAEs",
+        labels={"value": "Loss", "variable": "Model"},
+    )
+    fig.show()
 
 
 # %%
