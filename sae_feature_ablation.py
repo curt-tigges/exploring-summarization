@@ -731,7 +731,7 @@ prompt = model.generate(
 (original_logits, original_loss), clean_cache = model.run_with_cache(
     prompt, return_type="both", loss_per_token=True, prepend_bos=True
 )
-model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [layer]])
+model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [abl_layer]])
 (sae_logits, sae_loss), sae_cache = model.run_with_cache(
     prompt, return_type="both", loss_per_token=True, prepend_bos=True
 )
@@ -811,8 +811,8 @@ abl_layer, abl_pos = layer, position
 
 
 # features_to_ablate = all_live_features.tolist()
-features_to_ablate = [12508, 12266, 22477]
-
+features_to_ablate = [12508, 12266, 22477, 15006]
+model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [abl_layer]])
 for feature_id in tqdm(features_to_ablate):
     abl_logits, abl_loss = model.run_with_hooks(
         prompt,
@@ -1012,3 +1012,4 @@ vocab_df.sort_values("original_logits", ascending=False).head(1000).sort_values(
 ).head(100)[["m_abl_15006"]].style.format("{:.2f}").background_gradient(
     cmap="RdBu", axis=0
 )
+# %%
