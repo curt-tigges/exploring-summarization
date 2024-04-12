@@ -44,12 +44,19 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
+from torch import Tensor
 from jaxtyping import Float
 
 from transformer_lens import HookedTransformer
 from transformer_lens.ActivationCache import ActivationCache
 from transformer_lens.hook_points import HookPoint  # Hooking utilities
 from torch.nn.functional import kl_div
+from transformer_lens.evals import make_owt_data_loader
+from typing import List
+import plotly.graph_objects as go
+from tqdm.auto import tqdm
+from functools import partial
+from einops import rearrange
 
 
 def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_list"):
@@ -68,9 +75,11 @@ def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_lis
 # # Set Up
 
 # %%
+torch.set_grad_enabled(False)
 device = "cuda:0"
 model = HookedTransformer.from_pretrained("gpt2-small", device="cpu")
-LAYER = 5
+LAYER = 3
+features_to_ablate = [12508, 12266, 22477, 3121, 4135, 7838, 4494]
 gpt2_small_sparse_autoencoders, gpt2_small_sae_sparsities = get_gpt2_res_jb_saes()
 
 sparse_autoencoder = gpt2_small_sparse_autoencoders[
@@ -78,7 +87,6 @@ sparse_autoencoder = gpt2_small_sparse_autoencoders[
 ]
 sparse_autoencoder.eval()
 
-activation_store = ActivationsStore.from_config(model, sparse_autoencoder.cfg)
 model = model.to(device)
 
 
@@ -370,89 +378,65 @@ class HookedSAETransformer(HookedTransformer):
 
 
 # %%
-def logits_to_ave_logit_diff(logits, answer_tokens, per_prompt=False):
-    # Only the final logits are relevant for the answer
-    final_logits = logits[:, -1, :]
-    answer_logits = final_logits.gather(dim=-1, index=answer_tokens)
-    answer_logit_diff = answer_logits[:, 0] - answer_logits[:, 1]
-    if per_prompt:
-        return answer_logit_diff
-    else:
-        return answer_logit_diff.mean()
-
-
-# %%
-model: HookedSAETransformer = HookedSAETransformer.from_pretrained("gpt2-small").to(
-    device
-)
+model = HookedSAETransformer.from_pretrained("gpt2-small").to(device)
 # %%
 # HookedSAETransformer will have this method.
 inference_sparse_autoencoder.to(device)
 model.attach_sae(inference_sparse_autoencoder)
+# %% [markdown]
+# # OpenWebText activations
+# %%
+batch_size = 8
+dataloader = make_owt_data_loader(model.tokenizer, batch_size=batch_size)
+# %%
+feature_owt_activations = torch.empty(
+    (len(dataloader.dataset), model.cfg.n_ctx, len(features_to_ablate))
+)
+for batch_idx, batch in enumerate(tqdm(dataloader)):
+    _, batch_cache = model.run_with_cache(
+        batch["tokens"],
+        return_type=None,
+        names_filter=lambda name: "hidden_post" in name,
+        prepend_bos=False,
+    )
+    batch_acts = batch_cache[
+        utils.get_act_name("resid_pre", LAYER) + ".hook_hidden_post"
+    ][:, :, features_to_ablate]
+    feature_owt_activations[batch_idx * batch_size : (batch_idx + 1) * batch_size] = (
+        batch_acts.detach().cpu()
+    )
+# %%
+# max activations per feature
+feature_owt_activations.max(dim=0).values.max(dim=0).values
+
 
 # %%
-
-
-def zero_ablate_resid(resid, hook, pos=None):
-    if pos is None:
-        resid[:] = 0.0
-    else:
-        resid[:, pos, :] = 0.0
-    return resid
+def get_topk_activation_positions(
+    activations: Float[Tensor, "batch pos feature"],
+    topk: int = 10,
+) -> Tuple[Float[Tensor, "feature topk"], Float[Tensor, "feature topk"]]:
+    activations_by_feature = rearrange(
+        activations, "batch pos feature -> feature (batch pos)"
+    )
+    topk_indices: Int[Tensor, "feature topk"]
+    _, topk_indices = activations_by_feature.topk(top_k, dim=1)
+    n_ctx = activations_by_feature.shape[1]
+    topk_batches = topk_indices // n_ctx
+    topk_positions = topk_indices % n_ctx
+    return topk_batches, topk_positions
 
 
 # %%
-from typing import List
-import plotly.graph_objects as go
-
-
-def show_avg_logit_diffs(x_axis: List[str], per_prompt_logit_diffs: List[torch.tensor]):
-
-    y_data = [
-        per_prompt_logit_diff.mean().item()
-        for per_prompt_logit_diff in per_prompt_logit_diffs
-    ]
-    error_y_data = [
-        per_prompt_logit_diff.std().item()
-        for per_prompt_logit_diff in per_prompt_logit_diffs
-    ]
-
-    fig = go.Figure(
-        data=[
-            go.Bar(
-                x=x_axis,
-                y=y_data,
-                error_y=dict(
-                    type="data",  # specifies that the actual values are given
-                    array=error_y_data,  # the magnitudes of the errors
-                    visible=True,  # make error bars visible
-                ),
-            )
-        ]
-    )
-
-    # Customize layout
-    fig.update_layout(
-        title_text=f"Logit Diff after Interventions",
-        xaxis_title_text="Intervention",
-        yaxis_title_text="Logit diff",
-        plot_bgcolor="white",
-    )
-
-    # Show the figure
-    fig.show()
-
+k_activations = 10  # number of top activations to look at
+top_activation_batches, top_activation_positions = get_topk_activation_positions(
+    feature_owt_activations, k_activations
+)
 
 # %% [markdown]
-# # Ablation + Measure Logit Difference
+# # Ablation + Measure Loss Difference
+
 
 # %%
-from tqdm import tqdm
-from functools import partial
-
-# %%
-
-
 def ablate_sae_feature(sae_acts, hook, pos, feature_id, inclusive=False):
     if pos is None:
         sae_acts[:, :, feature_id] = 0.0
@@ -467,16 +451,11 @@ def ablate_sae_feature(sae_acts, hook, pos, feature_id, inclusive=False):
     return sae_acts
 
 
-# %% [markdown]
-# # Ablating SAE Features and looking at the downstream effects
-
-
 # %%
 def ablate_sae_features_for_prompt(
     prompt: str,
     abl_layer: int,
     abl_pos: int,
-    measure_position: int,
     sae_features: List[int],
     model: HookedSAETransformer,
     prepend_bos: bool = True,
@@ -523,64 +502,33 @@ def ablate_sae_features_for_prompt(
         ).squeeze().detach().cpu().numpy() - (
             sae_loss - original_loss
         ).squeeze().detach().cpu().numpy()
-        ablation_df[f"kl_div_{feature_id}"] = (
-            kl_div(
-                sae_logits[:, measure_position].softmax(dim=-1),
-                abl_logits[:, measure_position].softmax(dim=-1),
-            )
-            .squeeze()
-            .detach()
-            .cpu()
-            .numpy()
-        )
     return ablation_df
 
 
 # %%
+window_half_width = 5
+for act_idx in range(k_activations):
+    for feature in features_to_ablate:
+        act_batch = top_activation_batches[feature, act_idx].item()
+        act_pos = top_activation_positions[feature, act_idx].item()
+        assert isinstance(act_batch, int)
+        assert isinstance(act_pos, int)
+        start_pos = max(0, act_pos - window_half_width)
+        end_pos = min(act_pos + window_half_width, model.cfg.n_ctx)
+        tokens = dataloader.dataset[act_batch]["tokens"]
+        prompt = model.to_string(tokens)
+        ablation_df = ablate_sae_features_for_prompt(
+            prompt, LAYER, act_pos, [feature], model, prepend_bos=False
+        )
+        fig = px.line(
+            ablation_df[start_pos:end_pos],
+            x="unique_tokens",
+            y=["original_loss", "sae_loss"]
+            + [f"abl_loss_{i}" for i in features_to_ablate],
+            title="Loss per token with and without SAEs",
+            labels={"value": "Loss", "variable": "Model"},
+        )
+        fig.show()
 
-
-model.turn_saes_off()
-movie_prompt_short = "I loved this movie. It was great. \nIn summary: This movie is"
-abl_layer = LAYER
-movie_prompt = model.generate(
-    movie_prompt_short,
-    max_new_tokens=40,
-    stop_at_eos=False,
-    temperature=0.7,
-    verbose=False,
-)
-(original_logits, original_loss), clean_cache = model.run_with_cache(
-    movie_prompt, return_type="both", loss_per_token=True, prepend_bos=True
-)
-model.turn_saes_on([f"blocks.{layer}.hook_resid_pre" for layer in [abl_layer]])
-(sae_logits, sae_loss), sae_cache = model.run_with_cache(
-    movie_prompt, return_type="both", loss_per_token=True, prepend_bos=True
-)
-# Let's make a longer prompt and see the log probabilities of the tokens
-assert isinstance(movie_prompt, str)
-cv.logits.token_log_probs(
-    model.to_tokens(movie_prompt),
-    model(movie_prompt)[0].log_softmax(dim=-1),
-    model.to_string,
-)
-# %%
-features_to_ablate = [12508, 12266, 22477]
-ablation_df = ablate_sae_features_for_prompt(
-    movie_prompt,
-    abl_layer,
-    11,
-    17,
-    features_to_ablate,
-    model,
-    prepend_bos=True,
-)
-# %%
-px.line(
-    ablation_df,
-    x="unique_tokens",
-    y=["original_loss", "sae_loss"] + [f"abl_loss_{i}" for i in features_to_ablate],
-    title="Loss per token with and without SAEs",
-    labels={"value": "Loss", "variable": "Model"},
-)
 
 # %%
