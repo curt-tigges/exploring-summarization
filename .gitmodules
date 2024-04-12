@@ -7,3 +7,6 @@
 [submodule "TransformerLens"]
 	path = TransformerLens
 	url = https://github.com/ojh31/TransformerLens.git
+[submodule "SAELens"]
+	path = SAELens
+	url = https://github.com/jbloomAus/SAELens.git
