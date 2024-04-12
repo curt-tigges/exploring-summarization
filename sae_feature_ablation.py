@@ -55,7 +55,7 @@ def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_lis
 # # Set Up
 
 # %%
-model = HookedTransformer.from_pretrained("gpt2-small")
+model = HookedTransformer.from_pretrained("gpt2-small", device="cpu")
 gpt2_small_sparse_autoencoders, gpt2_small_sae_sparsities = get_gpt2_res_jb_saes()
 
 sparse_autoencoder = gpt2_small_sparse_autoencoders["blocks.5.hook_resid_pre"]
@@ -72,13 +72,16 @@ class InferenceSparseAutoencoder(SparseAutoencoder):
 
 
 def cast_to_inference_sparse_autoencoder(sparse_autoencoder: SparseAutoencoder):
+    print("Casting to InferenceSparseAutoencoder...")
     inference_sparse_autoencoder = InferenceSparseAutoencoder(sparse_autoencoder.cfg)
+    print("Copying state dict...")
     inference_sparse_autoencoder.load_state_dict(sparse_autoencoder.state_dict())
     return inference_sparse_autoencoder
 
 
 inference_sparse_autoencoder = cast_to_inference_sparse_autoencoder(sparse_autoencoder)
-inference_sparse_autoencoder(activation_store.next_batch()).shape
+# %%
+# inference_sparse_autoencoder(activation_store.next_batch()).shape
 
 # %%
 import logging
@@ -362,7 +365,8 @@ class HookedSAETransformer(HookedTransformer):
 # # Using HookedSAETransformer
 
 # %%
-device = "mps"
+device = "cuda:0"
+model = model.to(device)
 
 
 prompt_format = [
@@ -431,7 +435,10 @@ model: HookedSAETransformer = HookedSAETransformer.from_pretrained("gpt2-small")
 # %%
 # HookedSAETransformer will have this method.
 model.attach_sae(inference_sparse_autoencoder)
-
+# %%
+assert model.cfg.device == str(tokens.device), (
+    f"Model device: {model.cfg.device}, " f"tokens device: {tokens.device}"
+)
 # %%
 logits_with_saes = model(tokens)
 average_logit_diff_with_saes = logits_to_ave_logit_diff(logits_with_saes, answer_tokens)
@@ -442,8 +449,8 @@ per_prompt_diff_with_saes = logits_to_ave_logit_diff(
 
 # %%
 for sae in gpt2_small_sparse_autoencoders.values():
-    sae.cfg.device = "mps"
-    sae.to("mps")
+    sae.cfg.device = device
+    sae.to(device)
     model.attach_sae(cast_to_inference_sparse_autoencoder(sae))
 print("SAEs turned on before:", model.get_saes_status())
 # model.turn_saes_off()
@@ -638,7 +645,7 @@ for feature_id in tqdm(all_live_features):
         abl_feature_logits, answer_tokens, per_prompt=True
     )  # [batch]
     del abl_feature_logits
-    torch.mps.empty_cache()
+    torch.cuda.empty_cache()
     causal_effects[:, fid_to_idx[feature_id]] = (
         abl_feature_logit_diff - clean_sae_baseline_per_prompt
     )
