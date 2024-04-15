@@ -539,36 +539,66 @@ for feature_i, act_idx in activation_feature_iter:
     ablation_df = ablate_sae_features_for_prompt(
         tokens, LAYER, act_pos, [feature], model, prepend_bos=False
     )
-    fig = px.line(
-        ablation_df.iloc[start_pos:end_pos],
-        x="unique_tokens",
-        y=["original_loss", "sae_loss", f"abl_loss_{feature}"],
-        title=f"Loss per token with and without SAEs: feature {feature}, activation {act_idx}",
-        labels={"value": "Loss", "variable": "Model"},
-    )
-    fig.update_layout(
-        yaxis2=dict(
-            title=f"act_{feature}",
-            overlaying="y",
-            side="right",
-            line=dict(dash="dash"),
+    fig = go.Figure()
+    x_labels = ablation_df["unique_tokens"].iloc[start_pos:end_pos].values
+    x_values = np.arange(len(x_labels))
+    # Add traces for original_loss, sae_loss, and abl_loss_{feature}
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df["original_loss"].iloc[start_pos:end_pos],
+            mode="lines",
+            name="original_loss",
+            yaxis="y",
         )
     )
-    # Assign the trace corresponding to f"act_{feature}" to the secondary y-axis
-    # Adjust this index based on the position of f"act_{feature}" in your y array
-    fig.update_traces(
-        overwrite=True, selector=dict(name=f"abl_loss_{feature}"), yaxis="y2"
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df["sae_loss"].iloc[start_pos:end_pos],
+            mode="lines",
+            name="sae_loss",
+            yaxis="y",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df[f"abl_loss_{feature}"].iloc[start_pos:end_pos],
+            mode="lines",
+            name=f"abl_loss_{feature}",
+            yaxis="y",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df[f"act_{feature}"].iloc[start_pos:end_pos],
+            mode="lines",
+            name=f"act_{feature}",
+            yaxis="y2",  # Assign this trace to the second y-axis
+        )
     )
 
     # Add a vertical dotted line at act_pos
     fig.add_vline(
         x=act_pos - start_pos,
         line_dash="dot",  # Makes the line dotted
-        # line_color="red"  # Optional: you can change the color of the line,
-        annotation="ablation position",
+        annotation_text="ablation position",
+    )
+    fig.update_layout(
+        title=f"Loss per token with and without SAEs: feature {feature}, activation {act_idx}",
+        xaxis_title="Unique Tokens",
+        yaxis_title="Loss",
+        yaxis2=dict(title="Activation", overlaying="y", side="right"),
+        xaxis=dict(tickvals=x_values, ticktext=x_labels),
     )
 
     fig.show()
+    break
 
 
 # %%
