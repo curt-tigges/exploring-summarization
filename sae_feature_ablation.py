@@ -469,6 +469,8 @@ def ablate_sae_features_for_prompt(
     model: HookedSAETransformer,
     prepend_bos: bool = True,
 ) -> pd.DataFrame:
+    resid_pre_name = f"blocks.{abl_layer}.hook_resid_pre"
+    hidden_post_name = utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post"
     unique_tokens = [
         f"{i}/{token}" for i, token in enumerate(model.to_str_tokens(tokens)[:-1])
     ]
@@ -476,10 +478,12 @@ def ablate_sae_features_for_prompt(
     original_loss = model(
         tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
     ).squeeze(0)
-    model.turn_saes_on([f"blocks.{abl_layer}.hook_resid_pre"])
-    sae_loss = model(
+    model.turn_saes_on([resid_pre_name])
+    sae_loss, sae_cache = model.run_with_cache(
         tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
-    ).squeeze(0)
+    )
+    assert isinstance(sae_loss, torch.Tensor)
+    sae_loss = sae_loss.squeeze(0)
     ablation_df = pd.DataFrame(
         {
             "unique_tokens": unique_tokens,
@@ -495,7 +499,7 @@ def ablate_sae_features_for_prompt(
             loss_per_token=True,
             fwd_hooks=[
                 (
-                    utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post",
+                    hidden_post_name,
                     partial(
                         ablate_sae_feature,
                         pos=abl_pos,
@@ -507,9 +511,13 @@ def ablate_sae_features_for_prompt(
             prepend_bos=prepend_bos,
         ).squeeze(0)
         ablation_df[f"abl_loss_{feature_id}"] = abl_loss.detach().cpu().numpy()
-        ablation_df[f"m_abl_{feature_id}"] = (
-            abl_loss - original_loss
+        ablation_df[f"abl_loss_diff_{feature_id}"] = (
+            abl_loss - sae_loss
         ).detach().cpu().numpy() - (sae_loss - original_loss).detach().cpu().numpy()
+        ablation_df[f"act_{feature_id}"] = (
+            sae_cache[hidden_post_name][0, abl_pos, feature_id].detach().cpu().numpy()
+        )
+
     return ablation_df
 
 
@@ -535,9 +543,31 @@ for feature_i, act_idx in activation_feature_iter:
         ablation_df.iloc[start_pos:end_pos],
         x="unique_tokens",
         y=["original_loss", "sae_loss", f"abl_loss_{feature}"],
-        title="Loss per token with and without SAEs",
+        title=f"Loss per token with and without SAEs: feature {feature}, activation {act_idx}",
         labels={"value": "Loss", "variable": "Model"},
     )
+    fig.update_layout(
+        yaxis2=dict(
+            title=f"act_{feature}",
+            overlaying="y",
+            side="right",
+            line=dict(dash="dash"),
+        )
+    )
+    # Assign the trace corresponding to f"act_{feature}" to the secondary y-axis
+    # Adjust this index based on the position of f"act_{feature}" in your y array
+    fig.update_traces(
+        overwrite=True, selector=dict(name=f"abl_loss_{feature}"), yaxis="y2"
+    )
+
+    # Add a vertical dotted line at act_pos
+    fig.add_vline(
+        x=act_pos - start_pos,
+        line_dash="dot",  # Makes the line dotted
+        # line_color="red"  # Optional: you can change the color of the line,
+        annotation="ablation position",
+    )
+
     fig.show()
 
 
