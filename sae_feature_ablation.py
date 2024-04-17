@@ -51,7 +51,8 @@ from transformer_lens import HookedTransformer
 from transformer_lens.ActivationCache import ActivationCache
 from transformer_lens.hook_points import HookPoint  # Hooking utilities
 from torch.nn.functional import kl_div
-from transformer_lens.evals import make_owt_data_loader
+from transformer_lens.evals import load_dataset, DataLoader
+from transformer_lens.utils import tokenize_and_concatenate
 from typing import List
 import plotly.graph_objects as go
 from tqdm.auto import tqdm
@@ -389,21 +390,45 @@ model = HookedSAETransformer.from_pretrained("gpt2-small").to(device)
 # HookedSAETransformer will have this method.
 inference_sparse_autoencoder.to(device)
 model.attach_sae(inference_sparse_autoencoder)
+
+
 # %% [markdown]
 # # OpenWebText activations
+def make_owt_data_loader(tokenizer, batch_size=8):
+    """
+    Evaluate on OpenWebText an open source replication of the GPT-2 training corpus (Reddit links with >3 karma)
+
+    I think the Mistral models were trained on this dataset, so they get very good performance.
+    """
+    owt_data = load_dataset("stas/openwebtext-10k", split="train")
+    print(len(owt_data))
+    dataset = tokenize_and_concatenate(
+        owt_data, tokenizer, max_length=sparse_autoencoder.cfg.context_size
+    )
+    data_loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True
+    )
+    return data_loader
+
+
 # %%
 batch_size = 8
+model.tokenizer.model_max_length = sparse_autoencoder.cfg.context_size
 dataloader = make_owt_data_loader(model.tokenizer, batch_size=batch_size)
 # %%
 feature_owt_activations = torch.empty(
-    (len(dataloader.dataset), model.cfg.n_ctx, len(features_to_ablate))
+    (
+        len(dataloader.dataset),
+        sparse_autoencoder.cfg.context_size,
+        len(features_to_ablate),
+    )
 )
 for batch_idx, batch in enumerate(tqdm(dataloader)):
     _, batch_cache = model.run_with_cache(
         batch["tokens"],
         return_type=None,
         names_filter=lambda name: "hidden_post" in name,
-        prepend_bos=False,
+        prepend_bos=False,  # already tokenized
     )
     batch_acts = batch_cache[
         utils.get_act_name("resid_pre", LAYER) + ".hook_hidden_post"
@@ -441,21 +466,17 @@ assert top_activation_batches.shape == (len(features_to_ablate), k_activations)
 assert top_activation_positions.shape == (len(features_to_ablate), k_activations)
 assert top_activation_batches.max() < len(dataloader.dataset)
 assert top_activation_positions.max() < model.cfg.n_ctx
+# TODO: add assert for values of topk activations?
 # %% [markdown]
 # # Ablation + Measure Loss Difference
 
 
 # %%
-def ablate_sae_feature(sae_acts, hook, pos, feature_id, inclusive=False):
+def ablate_sae_feature(sae_acts, hook, pos, feature_id):
     if pos is None:
         sae_acts[:, :, feature_id] = 0.0
     else:
-        if not inclusive:
-            sae_acts[:, pos, feature_id] = 0.0
-        else:
-            # ablated from that pos onwards
-            pos = 1 + pos  # inclusive
-            sae_acts[:, :pos, feature_id] = 0.0
+        sae_acts[:, pos, feature_id] = 0.0
 
     return sae_acts
 
@@ -479,9 +500,15 @@ def ablate_sae_features_for_prompt(
         tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
     ).squeeze(0)
     model.turn_saes_on([resid_pre_name])
+    print("get_saes_status")
+    print(model.get_saes_status())
     sae_loss, sae_cache = model.run_with_cache(
         tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
     )
+    print("L0")
+    print(sae_cache[hidden_post_name][0, :].shape)
+    print((sae_cache[hidden_post_name][0, :] > 0).float().sum(dim=-1).shape)
+    print((sae_cache[hidden_post_name][0, :] > 0).float().sum(dim=-1).mean().item())
     assert isinstance(sae_loss, torch.Tensor)
     sae_loss = sae_loss.squeeze(0)
     ablation_df = pd.DataFrame(
@@ -504,7 +531,6 @@ def ablate_sae_features_for_prompt(
                         ablate_sae_feature,
                         pos=abl_pos,
                         feature_id=feature_id,
-                        inclusive=True,
                     ),
                 )
             ],
@@ -515,7 +541,7 @@ def ablate_sae_features_for_prompt(
             abl_loss - sae_loss
         ).detach().cpu().numpy() - (sae_loss - original_loss).detach().cpu().numpy()
         ablation_df[f"act_{feature_id}"] = (
-            sae_cache[hidden_post_name][0, abl_pos, feature_id].detach().cpu().numpy()
+            sae_cache[hidden_post_name][0, :-1, feature_id].detach().cpu().numpy()
         )
 
     return ablation_df
@@ -532,6 +558,9 @@ for feature_i, act_idx in activation_feature_iter:
     act_pos = top_activation_positions[feature_i, act_idx].item()
     assert isinstance(act_batch, int)
     assert isinstance(act_pos, int)
+    # assert feature_owt_activations[
+    #     act_batch, act_pos, feature_i
+    # ] > feature_owt_activations.quantile(0.99)
     start_pos = max(0, act_pos - window_half_width)
     end_pos = min(act_pos + window_half_width, model.cfg.n_ctx)
     tokens = dataloader.dataset[act_batch]["tokens"]
