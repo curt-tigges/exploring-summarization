@@ -57,7 +57,7 @@ from typing import List
 import plotly.graph_objects as go
 from tqdm.auto import tqdm
 from functools import partial
-from einops import rearrange
+import einops
 import itertools
 import plotly.io as pio
 
@@ -416,14 +416,19 @@ batch_size = 8
 model.tokenizer.model_max_length = sparse_autoencoder.cfg.context_size
 dataloader = make_owt_data_loader(model.tokenizer, batch_size=batch_size)
 # %%
-feature_owt_activations = torch.empty(
-    (
-        len(dataloader.dataset),
-        sparse_autoencoder.cfg.context_size,
-        len(features_to_ablate),
-    )
-)
+# feature_owt_activations = torch.empty(
+#     (
+#         len(dataloader.dataset),
+#         sparse_autoencoder.cfg.context_size,
+#         len(features_to_ablate),
+#     )
+# )
 for batch_idx, batch in enumerate(tqdm(dataloader)):
+    if 54212 // batch_size == batch_idx:
+        print(batch["tokens"][54212 % batch_size])
+    else:
+        continue
+
     _, batch_cache = model.run_with_cache(
         batch["tokens"],
         return_type=None,
@@ -445,16 +450,16 @@ feature_owt_activations.max(dim=0).values.max(dim=0).values
 def get_topk_activation_positions(
     activations: Float[Tensor, "batch pos feature"],
     topk: int = 10,
-) -> Tuple[Float[Tensor, "feature topk"], Float[Tensor, "feature topk"]]:
-    n_ctx = activations.shape[1]
-    activations_by_feature = rearrange(
-        activations, "batch pos feature -> feature (batch pos)"
-    )
-    topk_indices: Int[Tensor, "feature topk"]
-    _, topk_indices = activations_by_feature.topk(topk, dim=1)
-    topk_batches = topk_indices // n_ctx
-    topk_positions = topk_indices % n_ctx
-    return topk_batches, topk_positions
+) -> Tuple[Int[Tensor, "feature topk"], Int[Tensor, "feature topk"]]:
+    max_act_per_batch, max_pos_per_batch = activations.max(dim=1)  # [batch, feature]
+    topk_batches: Int[Tensor, "topk feature"] = max_act_per_batch.topk(
+        k=topk, dim=0, largest=True
+    ).indices
+    n_features = activations.shape[-1]
+    topk_positions: Int[Tensor, "topk feature"] = max_pos_per_batch[topk_batches][
+        :, torch.arange(n_features), torch.arange(n_features)
+    ]
+    return topk_batches.T, topk_positions.T
 
 
 # %%
@@ -466,7 +471,6 @@ assert top_activation_batches.shape == (len(features_to_ablate), k_activations)
 assert top_activation_positions.shape == (len(features_to_ablate), k_activations)
 assert top_activation_batches.max() < len(dataloader.dataset)
 assert top_activation_positions.max() < model.cfg.n_ctx
-# TODO: add assert for values of topk activations?
 # %% [markdown]
 # # Ablation + Measure Loss Difference
 
@@ -609,6 +613,8 @@ for feature_i, act_idx in activation_feature_iter:
             mode="lines",
             name=f"act_{feature}",
             yaxis="y2",  # Assign this trace to the second y-axis
+            # make the line dashed
+            line_dash="dash",
         )
     )
 
@@ -628,6 +634,5 @@ for feature_i, act_idx in activation_feature_iter:
 
     fig.show()
     break
-
 
 # %%
