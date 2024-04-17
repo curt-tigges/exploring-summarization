@@ -406,7 +406,7 @@ def make_owt_data_loader(tokenizer, batch_size=8):
         owt_data, tokenizer, max_length=sparse_autoencoder.cfg.context_size
     )
     data_loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=True, drop_last=True
+        dataset, batch_size=batch_size, shuffle=False, drop_last=True
     )
     return data_loader
 
@@ -416,19 +416,14 @@ batch_size = 8
 model.tokenizer.model_max_length = sparse_autoencoder.cfg.context_size
 dataloader = make_owt_data_loader(model.tokenizer, batch_size=batch_size)
 # %%
-# feature_owt_activations = torch.empty(
-#     (
-#         len(dataloader.dataset),
-#         sparse_autoencoder.cfg.context_size,
-#         len(features_to_ablate),
-#     )
-# )
+feature_owt_activations = torch.empty(
+    (
+        len(dataloader.dataset),
+        sparse_autoencoder.cfg.context_size,
+        len(features_to_ablate),
+    )
+)
 for batch_idx, batch in enumerate(tqdm(dataloader)):
-    if 54212 // batch_size == batch_idx:
-        print(batch["tokens"][54212 % batch_size])
-    else:
-        continue
-
     _, batch_cache = model.run_with_cache(
         batch["tokens"],
         return_type=None,
@@ -497,22 +492,16 @@ def ablate_sae_features_for_prompt(
     resid_pre_name = f"blocks.{abl_layer}.hook_resid_pre"
     hidden_post_name = utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post"
     unique_tokens = [
-        f"{i}/{token}" for i, token in enumerate(model.to_str_tokens(tokens)[:-1])
+        f"{i+1}/{token}" for i, token in enumerate(model.to_str_tokens(tokens)[1:])
     ]
     model.turn_saes_off()
     original_loss = model(
         tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
     ).squeeze(0)
     model.turn_saes_on([resid_pre_name])
-    print("get_saes_status")
-    print(model.get_saes_status())
     sae_loss, sae_cache = model.run_with_cache(
         tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
     )
-    print("L0")
-    print(sae_cache[hidden_post_name][0, :].shape)
-    print((sae_cache[hidden_post_name][0, :] > 0).float().sum(dim=-1).shape)
-    print((sae_cache[hidden_post_name][0, :] > 0).float().sum(dim=-1).mean().item())
     assert isinstance(sae_loss, torch.Tensor)
     sae_loss = sae_loss.squeeze(0)
     ablation_df = pd.DataFrame(
@@ -633,6 +622,5 @@ for feature_i, act_idx in activation_feature_iter:
     )
 
     fig.show()
-    break
 
 # %%
