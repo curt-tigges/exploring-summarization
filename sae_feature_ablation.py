@@ -87,7 +87,7 @@ model = HookedTransformer.from_pretrained("gpt2-small", device="cpu")
 # LAYER = 3
 # features_to_ablate = [12508, 12266, 22477, 3121, 4135, 7838, 4494]
 LAYER = 7
-features_to_ablate = list(range(24576))
+features_to_ablate = [22595, 23063]
 gpt2_small_sparse_autoencoders, gpt2_small_sae_sparsities = get_gpt2_res_jb_saes()
 
 sparse_autoencoder = gpt2_small_sparse_autoencoders[
@@ -452,6 +452,9 @@ def ablate_sae_features_for_prompt(
         ablation_df[f"abl_loss_diff_{feature_id}"] = (
             (abl_loss - sae_loss).detach().cpu().numpy()
         )
+        ablation_df[f"abl_loss_pct_diff_{feature_id}"] = (
+            ((abl_loss - sae_loss) / sae_loss).detach().cpu().numpy()
+        )
         ablation_df[f"act_{feature_id}"] = (
             sae_cache[hidden_post_name][0, :-1, feature_id].detach().cpu().numpy()
         )
@@ -465,41 +468,74 @@ def plot_ablation_results(
     feature: int,
     activation: Optional[int],
     position: Optional[int],
+    loss_info: str = "diff",
 ) -> go.Figure:
     assert isinstance(feature, int)
     fig = go.Figure()
     x_labels = ablation_df["unique_tokens"].values
     x_values = np.arange(len(x_labels))
     # Add traces for original_loss, sae_loss, and abl_loss_{feature}
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=ablation_df["original_loss"],
-            mode="lines",
-            name="original_loss",
-            yaxis="y",
+    if loss_info == "diff":
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=ablation_df[f"abl_loss_diff_{feature}"],
+                mode="lines",
+                name=f"abl_loss_diff_{feature}",
+                yaxis="y",
+                text=[
+                    f"SAE Loss: {loss:.2f}" for loss in ablation_df["sae_loss"]
+                ],  # Formatting hover text with label
+                hoverinfo="x+y+text",  # Show x, y values, and the text in hover
+            )
         )
-    )
+        yaxis_title = "Loss Difference"
+    elif loss_info == "pct_diff":
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=ablation_df[f"abl_loss_pct_diff_{feature}"],
+                mode="lines",
+                name=f"abl_loss_pct_diff_{feature}",
+                yaxis="y",
+                text=[
+                    f"SAE Loss: {loss:.2f}" for loss in ablation_df["sae_loss"]
+                ],  # Formatting hover text with label
+                hoverinfo="x+y+text",  # Show x, y values, and the text in hover
+            )
+        )
+        yaxis_title = "Loss Percentage Difference"
+    else:
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=ablation_df["original_loss"],
+                mode="lines",
+                name="original_loss",
+                yaxis="y",
+            )
+        )
 
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=ablation_df["sae_loss"],
-            mode="lines",
-            name="sae_loss",
-            yaxis="y",
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=ablation_df["sae_loss"],
+                mode="lines",
+                name="sae_loss",
+                yaxis="y",
+            )
         )
-    )
 
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=ablation_df[f"abl_loss_{feature}"],
-            mode="lines",
-            name=f"abl_loss_{feature}",
-            yaxis="y",
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=ablation_df[f"abl_loss_{feature}"],
+                mode="lines",
+                name=f"abl_loss_{feature}",
+                yaxis="y",
+            )
         )
-    )
+        yaxis_title = "Loss"
 
     fig.add_trace(
         go.Scatter(
@@ -526,7 +562,7 @@ def plot_ablation_results(
     fig.update_layout(
         title=title,
         xaxis_title="Unique Tokens",
-        yaxis_title="Loss",
+        yaxis_title=yaxis_title,
         yaxis2=dict(title="Activation", overlaying="y", side="right"),
         xaxis=dict(tickvals=x_values, ticktext=x_labels),
     )
@@ -671,11 +707,12 @@ def get_topk_activation_positions(
 
 # %%
 k_activations = 10  # number of top activations to look at
+# weighted_owt_activations = feature_owt_activations * einops.repeat(
+#     is_comma_mask, "batch pos -> batch pos feature", feature=len(features_to_ablate)
+# )
+weighted_owt_activations = feature_owt_activations
 top_activation_batches, top_activation_positions = get_topk_activation_positions(
-    feature_owt_activations
-    * einops.repeat(
-        is_comma_mask, "batch pos -> batch pos feature", feature=len(features_to_ablate)
-    ),
+    weighted_owt_activations,
     k_activations,
 )
 assert top_activation_batches.shape == (len(features_to_ablate), k_activations)
@@ -686,7 +723,9 @@ assert top_activation_positions.max() < model.cfg.n_ctx
 # # Ablation + Measure Loss Difference
 
 # %%
-window_half_width = 10
+left_width = 10
+right_width = 20
+min_loss_diff = 0.1
 activation_feature_iter = tqdm(
     list(itertools.product(range(len(features_to_ablate)), range(k_activations))),
     total=len(features_to_ablate) * k_activations,
@@ -699,15 +738,20 @@ for feature_i, act_idx in activation_feature_iter:
     # assert feature_owt_activations[
     #     act_batch, act_pos, feature_i
     # ] > feature_owt_activations.quantile(0.99)
-    start_pos = max(0, act_pos - window_half_width)
-    end_pos = min(act_pos + window_half_width, model.cfg.n_ctx)
+    start_pos = max(0, act_pos - left_width)
+    end_pos = min(act_pos + right_width, model.cfg.n_ctx)
     tokens = dataloader.dataset[act_batch]["tokens"]
     feature = features_to_ablate[feature_i]
     ablation_df = ablate_sae_features_for_prompt(
         tokens, LAYER, act_pos, [feature], model, prepend_bos=False
     )
+    if (
+        ablation_df[f"abl_loss_diff_{feature}"].iloc[act_pos + 1 : end_pos].max()
+        < min_loss_diff
+    ):
+        continue
     fig = plot_ablation_results(
-        ablation_df.iloc[start_pos:end_pos], feature, act_idx, int(abl_pos - start_pos)
+        ablation_df.iloc[start_pos:end_pos], feature, act_idx, act_pos - start_pos
     )
     fig.show()
 
