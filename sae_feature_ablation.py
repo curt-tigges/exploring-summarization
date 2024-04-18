@@ -85,8 +85,12 @@ def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_lis
 torch.set_grad_enabled(False)
 device = "cuda:0"
 model = HookedTransformer.from_pretrained("gpt2-small", device="cpu")
-LAYER = 3
-features_to_ablate = [12508, 12266, 22477, 3121, 4135, 7838, 4494]
+# LAYER = 8
+# features_to_ablate = [12477, 6614, 13563, 8341, 7276, 6508, 16021, 2761, 20847, 23510]
+# LAYER = 3
+# features_to_ablate = [12508, 12266, 22477, 3121, 4135, 7838, 4494]
+LAYER = 7
+features_to_ablate = list(range(24576))
 gpt2_small_sparse_autoencoders, gpt2_small_sae_sparsities = get_gpt2_res_jb_saes()
 
 sparse_autoencoder = gpt2_small_sparse_autoencoders[
@@ -95,6 +99,7 @@ sparse_autoencoder = gpt2_small_sparse_autoencoders[
 sparse_autoencoder.eval()
 
 model = model.to(device)
+assert isinstance(sparse_autoencoder.cfg.d_sae, int)
 
 
 # %%
@@ -380,6 +385,156 @@ class HookedSAETransformer(HookedTransformer):
         }
 
 
+# %%
+def ablate_sae_feature(sae_acts, hook, pos, feature_id):
+    if pos is None:
+        sae_acts[:, :, feature_id] = 0.0
+    else:
+        sae_acts[:, pos, feature_id] = 0.0
+
+    return sae_acts
+
+
+# %%
+def ablate_sae_features_for_prompt(
+    tokens: Int[Tensor, "n_ctx"],
+    abl_layer: int,
+    abl_pos: int,
+    sae_features: List[int],
+    model: HookedSAETransformer,
+    prepend_bos: bool = True,
+) -> pd.DataFrame:
+    resid_pre_name = f"blocks.{abl_layer}.hook_resid_pre"
+    hidden_post_name = utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post"
+    unique_tokens = [
+        f"{i+1}/{token}" for i, token in enumerate(model.to_str_tokens(tokens)[1:])
+    ]
+    model.turn_saes_off()
+    original_loss = model(
+        tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
+    ).squeeze(0)
+    model.turn_saes_on([resid_pre_name])
+    sae_loss, sae_cache = model.run_with_cache(
+        tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
+    )
+    assert isinstance(sae_loss, torch.Tensor)
+    sae_loss = sae_loss.squeeze(0)
+    ablation_df = pd.DataFrame(
+        columns=[
+            "unique_tokens",
+            "original_loss",
+            "sae_loss",
+            *[f"abl_loss_{feature}" for feature in sae_features],
+            *[f"abl_loss_diff_{feature}" for feature in sae_features],
+            *[f"act_{feature}" for feature in sae_features],
+        ],
+        index=range(len(tokens) - 1),
+    )
+    ablation_df["unique_tokens"] = unique_tokens
+    ablation_df["original_loss"] = original_loss.detach().cpu().numpy()
+    ablation_df["sae_loss"] = sae_loss.detach().cpu().numpy()
+    feature_iter = tqdm(sae_features) if len(sae_features) > 1 else sae_features
+    for feature_id in feature_iter:
+        abl_loss = model.run_with_hooks(
+            tokens,
+            return_type="loss",
+            loss_per_token=True,
+            fwd_hooks=[
+                (
+                    hidden_post_name,
+                    partial(
+                        ablate_sae_feature,
+                        pos=abl_pos,
+                        feature_id=feature_id,
+                    ),
+                )
+            ],
+            prepend_bos=prepend_bos,
+        ).squeeze(0)
+        ablation_df[f"abl_loss_{feature_id}"] = abl_loss.detach().cpu().numpy()
+        ablation_df[f"abl_loss_diff_{feature_id}"] = (
+            (abl_loss - sae_loss).detach().cpu().numpy()
+        )
+        ablation_df[f"act_{feature_id}"] = (
+            sae_cache[hidden_post_name][0, :-1, feature_id].detach().cpu().numpy()
+        )
+
+    return ablation_df
+
+
+# %%
+def plot_ablation_results(
+    ablation_df: pd.DataFrame,
+    feature: int,
+    activation: Optional[int],
+    position: Optional[int],
+) -> go.Figure:
+    fig = go.Figure()
+    x_labels = ablation_df["unique_tokens"].values
+    x_values = np.arange(len(x_labels))
+    # Add traces for original_loss, sae_loss, and abl_loss_{feature}
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df["original_loss"],
+            mode="lines",
+            name="original_loss",
+            yaxis="y",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df["sae_loss"],
+            mode="lines",
+            name="sae_loss",
+            yaxis="y",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df[f"abl_loss_{feature}"],
+            mode="lines",
+            name=f"abl_loss_{feature}",
+            yaxis="y",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=ablation_df[f"act_{feature}"],
+            mode="lines",
+            name=f"act_{feature}",
+            yaxis="y2",  # Assign this trace to the second y-axis
+            # make the line dashed
+            line_dash="dash",
+        )
+    )
+
+    if position is not None:
+        # Add a vertical dotted line at act_pos
+        fig.add_vline(
+            x=position,
+            line_dash="dot",  # Makes the line dotted
+            annotation_text="first ablation position",
+        )
+    title = f"Loss per token with and without SAEs: feature {feature}"
+    if activation is not None:
+        title += f", activation {activation}"
+    fig.update_layout(
+        title=title,
+        xaxis_title="Unique Tokens",
+        yaxis_title="Loss",
+        yaxis2=dict(title="Activation", overlaying="y", side="right"),
+        xaxis=dict(tickvals=x_values, ticktext=x_labels),
+    )
+    return fig
+
+
 # %% [markdown]
 # # Using HookedSAETransformer
 
@@ -390,6 +545,34 @@ model = HookedSAETransformer.from_pretrained("gpt2-small").to(device)
 # HookedSAETransformer will have this method.
 inference_sparse_autoencoder.to(device)
 model.attach_sae(inference_sparse_autoencoder)
+# %%
+prompt = "I loved this movie.\nConclusion: this movie was"
+prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
+abl_pos = torch.where(prompt_tokens == model.to_single_token("."))[1].item()
+print(abl_pos)
+# %%
+ablation_df = ablate_sae_features_for_prompt(
+    prompt_tokens,
+    LAYER,
+    abl_pos,
+    list(range(24576)),
+    model,
+    prepend_bos=True,
+)
+# %%
+loss_diff_cols = [col for col in ablation_df.columns if "abl_loss_diff" in col]
+ablation_df[loss_diff_cols].max().describe()
+# %%
+best_feature = ablation_df[loss_diff_cols].max().idxmax().item()
+print(best_feature)
+# # %%
+# act_cols = [col for col in ablation_df.columns if "act_" in col]
+# ablation_df[act_cols].max().describe()
+# # %%
+# ablation_df[act_cols].max().idxmax()
+# %%
+fig = plot_ablation_results(ablation_df, best_feature, None, abl_pos)
+fig.show()
 
 
 # %% [markdown]
@@ -416,12 +599,25 @@ batch_size = 8
 model.tokenizer.model_max_length = sparse_autoencoder.cfg.context_size
 dataloader = make_owt_data_loader(model.tokenizer, batch_size=batch_size)
 # %%
+is_comma_mask = torch.zeros(
+    (
+        len(dataloader.dataset),
+        sparse_autoencoder.cfg.context_size,
+    ),
+    dtype=torch.bool,
+)
+for batch_idx, batch in enumerate(tqdm(dataloader)):
+    is_comma_mask[batch_idx * batch_size : (batch_idx + 1) * batch_size] = batch[
+        "tokens"
+    ] == model.to_single_token(",")
+# %%
 feature_owt_activations = torch.empty(
     (
         len(dataloader.dataset),
         sparse_autoencoder.cfg.context_size,
         len(features_to_ablate),
-    )
+    ),
+    dtype=torch.float32,
 )
 for batch_idx, batch in enumerate(tqdm(dataloader)):
     _, batch_cache = model.run_with_cache(
@@ -460,7 +656,11 @@ def get_topk_activation_positions(
 # %%
 k_activations = 10  # number of top activations to look at
 top_activation_batches, top_activation_positions = get_topk_activation_positions(
-    feature_owt_activations, k_activations
+    feature_owt_activations
+    * einops.repeat(
+        is_comma_mask, "batch pos -> batch pos feature", feature=len(features_to_ablate)
+    ),
+    k_activations,
 )
 assert top_activation_batches.shape == (len(features_to_ablate), k_activations)
 assert top_activation_positions.shape == (len(features_to_ablate), k_activations)
@@ -468,77 +668,6 @@ assert top_activation_batches.max() < len(dataloader.dataset)
 assert top_activation_positions.max() < model.cfg.n_ctx
 # %% [markdown]
 # # Ablation + Measure Loss Difference
-
-
-# %%
-def ablate_sae_feature(sae_acts, hook, pos, feature_id):
-    if pos is None:
-        sae_acts[:, :, feature_id] = 0.0
-    else:
-        sae_acts[:, pos, feature_id] = 0.0
-
-    return sae_acts
-
-
-# %%
-def ablate_sae_features_for_prompt(
-    tokens: Int[Tensor, "n_ctx"],
-    abl_layer: int,
-    abl_pos: int,
-    sae_features: List[int],
-    model: HookedSAETransformer,
-    prepend_bos: bool = True,
-) -> pd.DataFrame:
-    resid_pre_name = f"blocks.{abl_layer}.hook_resid_pre"
-    hidden_post_name = utils.get_act_name("resid_pre", abl_layer) + ".hook_hidden_post"
-    unique_tokens = [
-        f"{i+1}/{token}" for i, token in enumerate(model.to_str_tokens(tokens)[1:])
-    ]
-    model.turn_saes_off()
-    original_loss = model(
-        tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
-    ).squeeze(0)
-    model.turn_saes_on([resid_pre_name])
-    sae_loss, sae_cache = model.run_with_cache(
-        tokens, return_type="loss", loss_per_token=True, prepend_bos=prepend_bos
-    )
-    assert isinstance(sae_loss, torch.Tensor)
-    sae_loss = sae_loss.squeeze(0)
-    ablation_df = pd.DataFrame(
-        {
-            "unique_tokens": unique_tokens,
-            "original_loss": original_loss.detach().cpu().numpy(),
-            "sae_loss": sae_loss.detach().cpu().numpy(),
-        }
-    )
-    feature_iter = tqdm(sae_features) if len(sae_features) > 1 else sae_features
-    for feature_id in feature_iter:
-        abl_loss = model.run_with_hooks(
-            tokens,
-            return_type="loss",
-            loss_per_token=True,
-            fwd_hooks=[
-                (
-                    hidden_post_name,
-                    partial(
-                        ablate_sae_feature,
-                        pos=abl_pos,
-                        feature_id=feature_id,
-                    ),
-                )
-            ],
-            prepend_bos=prepend_bos,
-        ).squeeze(0)
-        ablation_df[f"abl_loss_{feature_id}"] = abl_loss.detach().cpu().numpy()
-        ablation_df[f"abl_loss_diff_{feature_id}"] = (
-            abl_loss - sae_loss
-        ).detach().cpu().numpy() - (sae_loss - original_loss).detach().cpu().numpy()
-        ablation_df[f"act_{feature_id}"] = (
-            sae_cache[hidden_post_name][0, :-1, feature_id].detach().cpu().numpy()
-        )
-
-    return ablation_df
-
 
 # %%
 window_half_width = 10
@@ -561,66 +690,9 @@ for feature_i, act_idx in activation_feature_iter:
     ablation_df = ablate_sae_features_for_prompt(
         tokens, LAYER, act_pos, [feature], model, prepend_bos=False
     )
-    fig = go.Figure()
-    x_labels = ablation_df["unique_tokens"].iloc[start_pos:end_pos].values
-    x_values = np.arange(len(x_labels))
-    # Add traces for original_loss, sae_loss, and abl_loss_{feature}
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=ablation_df["original_loss"].iloc[start_pos:end_pos],
-            mode="lines",
-            name="original_loss",
-            yaxis="y",
-        )
+    fig = plot_ablation_results(
+        ablation_df.iloc[start_pos:end_pos], feature, act_idx, int(abl_pos - start_pos)
     )
-
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=ablation_df["sae_loss"].iloc[start_pos:end_pos],
-            mode="lines",
-            name="sae_loss",
-            yaxis="y",
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=ablation_df[f"abl_loss_{feature}"].iloc[start_pos:end_pos],
-            mode="lines",
-            name=f"abl_loss_{feature}",
-            yaxis="y",
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=x_values,
-            y=ablation_df[f"act_{feature}"].iloc[start_pos:end_pos],
-            mode="lines",
-            name=f"act_{feature}",
-            yaxis="y2",  # Assign this trace to the second y-axis
-            # make the line dashed
-            line_dash="dash",
-        )
-    )
-
-    # Add a vertical dotted line at act_pos
-    fig.add_vline(
-        x=act_pos - start_pos,
-        line_dash="dot",  # Makes the line dotted
-        annotation_text="ablation position",
-    )
-    fig.update_layout(
-        title=f"Loss per token with and without SAEs: feature {feature}, activation {act_idx}",
-        xaxis_title="Unique Tokens",
-        yaxis_title="Loss",
-        yaxis2=dict(title="Activation", overlaying="y", side="right"),
-        xaxis=dict(tickvals=x_values, ticktext=x_labels),
-    )
-
     fig.show()
 
 # %%
