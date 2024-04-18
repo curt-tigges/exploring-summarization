@@ -61,9 +61,6 @@ import einops
 import itertools
 import plotly.io as pio
 
-# %%
-pio.renderers.default = "notebook"
-
 
 # %%
 def open_neuronpedia(features: list[int], layer: int, name: str = "temporary_list"):
@@ -469,6 +466,7 @@ def plot_ablation_results(
     activation: Optional[int],
     position: Optional[int],
 ) -> go.Figure:
+    assert isinstance(feature, int)
     fig = go.Figure()
     x_labels = ablation_df["unique_tokens"].values
     x_values = np.arange(len(x_labels))
@@ -506,7 +504,7 @@ def plot_ablation_results(
     fig.add_trace(
         go.Scatter(
             x=x_values,
-            y=ablation_df[f"act_{feature}"],
+            y=ablation_df[f"act_{feature}"].shift(-1),
             mode="lines",
             name=f"act_{feature}",
             yaxis="y2",  # Assign this trace to the second y-axis
@@ -546,33 +544,51 @@ model = HookedSAETransformer.from_pretrained("gpt2-small").to(device)
 inference_sparse_autoencoder.to(device)
 model.attach_sae(inference_sparse_autoencoder)
 # %%
-prompt = "I loved this movie.\nConclusion: this movie was"
+prompt = "I loved this movie.\nConclusion: this movie was great"
 prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
 abl_pos = torch.where(prompt_tokens == model.to_single_token("."))[1].item()
 print(abl_pos)
 # %%
-ablation_df = ablate_sae_features_for_prompt(
+_, prompt_cache = model.run_with_cache(
+    prompt_tokens,
+    return_type=None,
+    names_filter=lambda name: "hidden_post" in name,
+    prepend_bos=False,  # already tokenized
+)
+feature_prompt_activations: Float[Tensor, "pos feature"] = prompt_cache[
+    utils.get_act_name("resid_pre", LAYER) + ".hook_hidden_post"
+].squeeze(0)
+prompt_features = torch.where(feature_prompt_activations[abl_pos])[0].tolist()
+# %%
+prompt_ablation_df = ablate_sae_features_for_prompt(
     prompt_tokens,
     LAYER,
     abl_pos,
-    list(range(24576)),
+    prompt_features,
     model,
     prepend_bos=True,
 )
 # %%
-loss_diff_cols = [col for col in ablation_df.columns if "abl_loss_diff" in col]
-ablation_df[loss_diff_cols].max().describe()
+loss_diff_cols = [col for col in prompt_ablation_df.columns if "abl_loss_diff" in col]
+prompt_ablation_df[loss_diff_cols].iloc[-1].describe()
 # %%
-best_feature = ablation_df[loss_diff_cols].max().idxmax().item()
-print(best_feature)
-# # %%
-# act_cols = [col for col in ablation_df.columns if "act_" in col]
-# ablation_df[act_cols].max().describe()
-# # %%
-# ablation_df[act_cols].max().idxmax()
+k_features = 10
+topk_features = (
+    prompt_ablation_df.iloc[-1][loss_diff_cols]
+    .astype(float)
+    .nlargest(k_features)
+    .index.str.split("_")
+    .str[-1]
+    .astype(int)
+    .values.tolist()
+)
+print(topk_features)
 # %%
-fig = plot_ablation_results(ablation_df, best_feature, None, abl_pos)
-fig.show()
+prompt_ablation_df[[f"abl_loss_diff_{f}" for f in topk_features]].iloc[-1]
+# %%
+for feature in topk_features:
+    fig = plot_ablation_results(prompt_ablation_df, feature, None, abl_pos)
+    fig.show()
 
 
 # %% [markdown]
