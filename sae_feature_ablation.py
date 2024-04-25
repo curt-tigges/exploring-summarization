@@ -84,7 +84,7 @@ model = HookedTransformer.from_pretrained("gpt2-small", device="cpu")
 # LAYER = 3
 # features_to_ablate = [12508, 12266, 22477, 3121, 4135, 7838, 4494]
 LAYER = 7
-owt_features = [22595, 23063]
+owt_features = [23063, 11708]
 gpt2_small_sparse_autoencoders, gpt2_small_sae_sparsities = get_gpt2_res_jb_saes()
 
 sparse_autoencoder = gpt2_small_sparse_autoencoders[
@@ -663,8 +663,35 @@ def make_owt_data_loader(tokenizer, batch_size=8):
 batch_size = 8
 model.tokenizer.model_max_length = sparse_autoencoder.cfg.context_size
 dataloader = make_owt_data_loader(model.tokenizer, batch_size=batch_size)
+
+
 # %%
-is_comma_mask = torch.zeros(
+def boolean_or_tensors(tensor_list):
+    """
+    Perform a boolean OR operation over a list of boolean tensors.
+
+    Args:
+    tensor_list (list[torch.BoolTensor]): A list of tensors to be ORed together.
+
+    Returns:
+    torch.BoolTensor: A tensor representing the element-wise OR of all tensors in the list.
+    """
+    if not tensor_list:  # Check if the list is empty
+        raise ValueError("The tensor list should not be empty.")
+
+    result = tensor_list[0]  # Start with the first tensor in the list
+    for tensor in tensor_list[1:]:  # Iterate over the rest of the tensors
+        result = torch.logical_or(result, tensor)  # Apply boolean OR
+
+    return result
+
+
+# %%
+punctuation_tokens = [
+    model.to_single_token(p)
+    for p in [".", ",", "!", "?", "...", " -", " --", "-", "--", "—", " —"]
+]
+is_punctuation_mask = torch.zeros(
     (
         len(dataloader.dataset),
         sparse_autoencoder.cfg.context_size,
@@ -672,9 +699,42 @@ is_comma_mask = torch.zeros(
     dtype=torch.bool,
 )
 for batch_idx, batch in enumerate(tqdm(dataloader)):
-    is_comma_mask[batch_idx * batch_size : (batch_idx + 1) * batch_size] = batch[
-        "tokens"
-    ] == model.to_single_token(",")
+    is_punctuation_mask[batch_idx * batch_size : (batch_idx + 1) * batch_size] = (
+        boolean_or_tensors(
+            [batch["tokens"] == punct_token for punct_token in punctuation_tokens]
+        )
+    )
+
+
+# %%
+def calculate_distances_from_true(bool_tensor):
+    """
+    Calculate the number of positions since the last True in a boolean tensor.
+
+    Args:
+    bool_tensor (torch.BoolTensor): A [batch, pos] tensor of booleans.
+
+    Returns:
+    torch.IntTensor: A tensor of the same shape containing distances from the last True.
+    """
+    batch_size, pos_size = bool_tensor.shape
+    distances = torch.zeros_like(bool_tensor, dtype=torch.int)
+
+    # Initialize the first position based on whether it's true or false
+    distances[:, 0] = 0 if bool_tensor[:, 0].any() else 1
+
+    # Compute distances
+    for i in range(1, pos_size):
+        distances[:, i] = (distances[:, i - 1] + 1) * ~bool_tensor[:, i]
+
+    # Set distances to 0 where the bool_tensor is True
+    distances[bool_tensor] = 0
+
+    return distances
+
+
+# %%
+punctuation_distances = calculate_distances_from_true(is_punctuation_mask)
 # %%
 feature_owt_activations = torch.empty(
     (
@@ -719,11 +779,14 @@ def get_topk_activation_positions(
 
 
 # %%
-k_activations = 10  # number of top activations to look at
-# weighted_owt_activations = feature_owt_activations * einops.repeat(
-#     is_comma_mask, "batch pos -> batch pos feature", feature=len(features_to_ablate)
-# )
-weighted_owt_activations = feature_owt_activations
+k_activations = 50  # number of top activations to look at
+min_punctuation_distance = 10
+weighted_owt_activations = feature_owt_activations * einops.repeat(
+    (punctuation_distances > min_punctuation_distance),
+    "batch pos -> batch pos feature",
+    feature=len(owt_features),
+)
+# weighted_owt_activations = feature_owt_activations
 top_activation_batches, top_activation_positions = get_topk_activation_positions(
     weighted_owt_activations,
     k_activations,
@@ -758,6 +821,8 @@ for feature_i, act_idx in activation_feature_iter:
     ablation_df = ablate_sae_features_for_prompt(
         tokens, LAYER, act_pos, [feature], model, prepend_bos=False
     )
+    if ablation_df.iloc[act_pos + 1 : end_pos].empty:
+        continue
     if (
         ablation_df[f"abl_loss_diff_{feature}"].iloc[act_pos + 1 : end_pos].max()
         < min_loss_diff
