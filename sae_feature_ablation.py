@@ -1,6 +1,3 @@
-# %% [markdown]
-# # Summarization (Day 2)
-
 # %%
 import sys
 
@@ -87,7 +84,7 @@ model = HookedTransformer.from_pretrained("gpt2-small", device="cpu")
 # LAYER = 3
 # features_to_ablate = [12508, 12266, 22477, 3121, 4135, 7838, 4494]
 LAYER = 7
-features_to_ablate = [22595, 23063]
+owt_features = [22595, 23063]
 gpt2_small_sparse_autoencoders, gpt2_small_sae_sparsities = get_gpt2_res_jb_saes()
 
 sparse_autoencoder = gpt2_small_sparse_autoencoders[
@@ -580,7 +577,7 @@ model = HookedSAETransformer.from_pretrained("gpt2-small").to(device)
 inference_sparse_autoencoder.to(device)
 model.attach_sae(inference_sparse_autoencoder)
 # %%
-prompt = "I loved this movie.\nConclusion: this movie was great"
+prompt = "I hated this movie.\nConclusion: this movie was terrible"
 prompt_tokens = model.to_tokens(prompt, prepend_bos=True)
 abl_pos = torch.where(prompt_tokens == model.to_single_token("."))[1].item()
 print(abl_pos)
@@ -625,6 +622,22 @@ prompt_ablation_df[[f"abl_loss_diff_{f}" for f in topk_features]].iloc[-1]
 for feature in topk_features:
     fig = plot_ablation_results(prompt_ablation_df, feature, None, abl_pos)
     fig.show()
+# %% [markdown]
+# #### Cosine similarity
+# %%
+# encoder similarity
+torch.cosine_similarity(
+    inference_sparse_autoencoder.W_enc[:, 23063],
+    inference_sparse_autoencoder.W_enc[:, 11708],
+    dim=0,
+)
+# %%
+# decoder similarity
+torch.cosine_similarity(
+    inference_sparse_autoencoder.W_dec[23063],
+    inference_sparse_autoencoder.W_dec[11708],
+    dim=0,
+)
 
 
 # %% [markdown]
@@ -667,7 +680,7 @@ feature_owt_activations = torch.empty(
     (
         len(dataloader.dataset),
         sparse_autoencoder.cfg.context_size,
-        len(features_to_ablate),
+        len(owt_features),
     ),
     dtype=torch.float32,
 )
@@ -680,7 +693,7 @@ for batch_idx, batch in enumerate(tqdm(dataloader)):
     )
     batch_acts = batch_cache[
         utils.get_act_name("resid_pre", LAYER) + ".hook_hidden_post"
-    ][:, :, features_to_ablate]
+    ][:, :, owt_features]
     feature_owt_activations[batch_idx * batch_size : (batch_idx + 1) * batch_size] = (
         batch_acts.detach().cpu()
     )
@@ -715,8 +728,8 @@ top_activation_batches, top_activation_positions = get_topk_activation_positions
     weighted_owt_activations,
     k_activations,
 )
-assert top_activation_batches.shape == (len(features_to_ablate), k_activations)
-assert top_activation_positions.shape == (len(features_to_ablate), k_activations)
+assert top_activation_batches.shape == (len(owt_features), k_activations)
+assert top_activation_positions.shape == (len(owt_features), k_activations)
 assert top_activation_batches.max() < len(dataloader.dataset)
 assert top_activation_positions.max() < model.cfg.n_ctx
 # %% [markdown]
@@ -727,8 +740,8 @@ left_width = 10
 right_width = 20
 min_loss_diff = 0.1
 activation_feature_iter = tqdm(
-    list(itertools.product(range(len(features_to_ablate)), range(k_activations))),
-    total=len(features_to_ablate) * k_activations,
+    list(itertools.product(range(len(owt_features)), range(k_activations))),
+    total=len(owt_features) * k_activations,
 )
 for feature_i, act_idx in activation_feature_iter:
     act_batch = top_activation_batches[feature_i, act_idx].item()
@@ -741,7 +754,7 @@ for feature_i, act_idx in activation_feature_iter:
     start_pos = max(0, act_pos - left_width)
     end_pos = min(act_pos + right_width, model.cfg.n_ctx)
     tokens = dataloader.dataset[act_batch]["tokens"]
-    feature = features_to_ablate[feature_i]
+    feature = owt_features[feature_i]
     ablation_df = ablate_sae_features_for_prompt(
         tokens, LAYER, act_pos, [feature], model, prepend_bos=False
     )
